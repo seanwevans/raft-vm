@@ -1,0 +1,22 @@
+[package]
+name = "raft"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "raft"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.10"
+clap = "4.0"  # command-line parsing
+serde = { version = "1.0", features = ["derive"] }  # serialization
+
+[profile.dev]
+debug = true
+
+[profile.release]
+debug = false

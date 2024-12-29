@@ -1,0 +1,6 @@
+/target
+*.bak
+*.lock
+docs/*
+examples/*
+tests/*
