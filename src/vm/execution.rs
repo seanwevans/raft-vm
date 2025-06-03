@@ -57,7 +57,14 @@ impl ExecutionContext {
         // Clone the opcode to avoid immutable borrow issues.
         let opcode = self.bytecode[ip].clone();
 
-        opcode.execute(self, heap, mailbox).await
+        let prev_ip = self.ip;
+        let result = opcode.execute(self, heap, mailbox).await;
+
+        if self.ip == prev_ip {
+            self.ip += 1;
+        }
+
+        result
     }
 
     pub fn ip(&self) -> usize {

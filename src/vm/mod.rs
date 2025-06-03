@@ -14,21 +14,3 @@ pub use crate::vm::execution::ExecutionContext;
 pub use crate::vm::vm::VM;
 pub use crate::vm::backend::Backend;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_basic_arithmetic() {
-        let code = vec![
-            OpCode::PushConst(Value::Integer(5)),
-            OpCode::PushConst(Value::Integer(3)),
-            OpCode::Add,
-        ];
-
-        let mut vm = VM::new(code);
-        vm.run().unwrap();
-
-        assert_eq!(vm.stack.pop(), Some(Value::Integer(8)));
-    }
-}

@@ -65,20 +65,73 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::opcodes::Value;
+    use crate::vm::value::Value;
 
-    #[test]
-    fn test_basic_arithmetic() {
+    #[tokio::test]
+    async fn test_basic_arithmetic() {
         let code = vec![
             OpCode::PushConst(Value::Integer(5)),
             OpCode::PushConst(Value::Integer(3)),
             OpCode::Add,
         ];
 
-        let mut vm = VM::new(code, Arc::new(Mutex::new(vec![])), None, Backend::default());
-        vm.run().unwrap();
+        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+        vm.run().await.unwrap();
 
-        assert_eq!(vm.execution.stack.pop(), Some(Value::Integer(8)));
+        match vm.execution.stack.pop() {
+            Some(Value::Integer(8)) => {}
+            other => panic!("Expected Some(Integer(8)), got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sequential_ip_increment() {
+        let code = vec![
+            OpCode::PushConst(Value::Integer(1)),
+            OpCode::PushConst(Value::Integer(2)),
+            OpCode::Add,
+        ];
+
+        let mut ctx = ExecutionContext::new(code);
+        let mut heap = Heap::new();
+        let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        ctx.step(&mut heap, &mut rx).await.unwrap();
+        assert_eq!(ctx.ip, 1);
+
+        ctx.step(&mut heap, &mut rx).await.unwrap();
+        assert_eq!(ctx.ip, 2);
+
+        ctx.step(&mut heap, &mut rx).await.unwrap();
+        assert_eq!(ctx.ip, 3);
+    }
+
+    #[tokio::test]
+    async fn test_jump_and_call_modify_ip() {
+        // Test Jump
+        let mut ctx = ExecutionContext::new(vec![
+            OpCode::Jump(2),
+            OpCode::PushConst(Value::Integer(0)),
+            OpCode::PushConst(Value::Integer(1)),
+        ]);
+        let mut heap = Heap::new();
+        let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        ctx.step(&mut heap, &mut rx).await.unwrap();
+        assert_eq!(ctx.ip, 2);
+
+        // Test Call
+        let mut ctx = ExecutionContext::new(vec![
+            OpCode::Call(2),
+            OpCode::PushConst(Value::Integer(99)),
+            OpCode::Return,
+        ]);
+        let mut heap = Heap::new();
+        let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        ctx.step(&mut heap, &mut rx).await.unwrap();
+        assert_eq!(ctx.ip, 2);
+        assert_eq!(ctx.call_stack, vec![0]);
     }
 }
 
