@@ -91,8 +91,7 @@ async fn start_repl() {
 
 
 fn unknown_command(cmd: &str) -> ! {
-    eprintln!("Unknown command: {}
-Usage: raft [run <filename>|repl|--version]", cmd);
+    eprintln!("Unknown command: {}\nUsage: raft [run <filename>|repl|--version]", cmd);
     process::exit(1);
 }
 
