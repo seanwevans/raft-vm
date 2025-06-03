@@ -70,12 +70,13 @@ cargo run -- --version
 
 Example `.raft` file:
 ```
-actor Main {
-    let x = 5;
-    let y = 10;
-    send self (x + y);
-}
+# push 1 and 2 on the stack and add them
+1 2 +
 ```
+
+The current compiler only tokenizes whitespace separated integers and
+the `+` operator. Running the above file will leave `3` on the VM's
+stack.
 
 ---
 
