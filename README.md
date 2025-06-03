@@ -120,3 +120,7 @@ Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
 
 ---
+
+## License
+This project is licensed under the [MIT License](LICENSE).
+
