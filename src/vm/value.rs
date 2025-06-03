@@ -2,7 +2,7 @@
 
 use log;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Value {
     Integer(i32),
     Float(f64),

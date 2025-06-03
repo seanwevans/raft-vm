@@ -18,17 +18,19 @@ pub use crate::vm::backend::Backend;
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_basic_arithmetic() {
+    use crate::vm::backend::Backend;
+
+    #[tokio::test]
+    async fn test_basic_arithmetic() {
         let code = vec![
             OpCode::PushConst(Value::Integer(5)),
             OpCode::PushConst(Value::Integer(3)),
             OpCode::Add,
         ];
 
-        let mut vm = VM::new(code);
-        vm.run().unwrap();
+        let (mut vm, _) = VM::new(code, None, Backend::default());
+        vm.run().await.unwrap();
 
-        assert_eq!(vm.stack.pop(), Some(Value::Integer(8)));
+        assert_eq!(vm.pop_stack(), Some(Value::Integer(8)));
     }
 }

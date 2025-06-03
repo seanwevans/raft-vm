@@ -20,7 +20,7 @@ pub struct VM {
 
 impl VM {
     pub fn new(
-        bytecode: Vec<OpCode>,        
+        bytecode: Vec<OpCode>,
         supervisor: Option<Sender<usize>>,
         backend: Backend,
     ) -> (Self, Sender<Value>) {
@@ -34,6 +34,10 @@ impl VM {
             supervisor,
             backend,
         }, tx)
+    }
+
+    pub fn pop_stack(&mut self) -> Option<Value> {
+        self.execution.stack.pop()
     }
 
     pub async fn run(&mut self) -> Result<(), String> {
@@ -65,20 +69,21 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::opcodes::Value;
+    use crate::vm::backend::Backend;
+    use crate::vm::value::Value;
 
-    #[test]
-    fn test_basic_arithmetic() {
+    #[tokio::test]
+    async fn test_basic_arithmetic() {
         let code = vec![
             OpCode::PushConst(Value::Integer(5)),
             OpCode::PushConst(Value::Integer(3)),
             OpCode::Add,
         ];
 
-        let mut vm = VM::new(code, Arc::new(Mutex::new(vec![])), None, Backend::default());
-        vm.run().unwrap();
+        let (mut vm, _) = VM::new(code, None, Backend::default());
+        vm.run().await.unwrap();
 
-        assert_eq!(vm.execution.stack.pop(), Some(Value::Integer(8)));
+        assert_eq!(vm.pop_stack(), Some(Value::Integer(8)));
     }
 }
 
