@@ -120,3 +120,22 @@ Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
 
 ---
+
+## Testing
+Run the test suite with Cargo:
+
+```bash
+cargo test
+```
+
+Build the project in release mode:
+
+```bash
+cargo build --release
+```
+
+## Contributing
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
