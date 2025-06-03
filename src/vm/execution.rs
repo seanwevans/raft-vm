@@ -49,15 +49,16 @@ impl ExecutionContext {
         let opcode = self.bytecode[self.ip];
         log::info!("Executing opcode: {:?}", opcode);
         
-        let stack = &mut self.stack;
-        let call_stack = &mut self.call_stack;
-        let ip = self.ip;
-        let locals = &mut self.locals;
+        // Clone the opcode to avoid immutable borrow issues during execution.
+        let opcode = self.bytecode[self.ip].clone();
 
-        // Clone the opcode to avoid immutable borrow issues.
-        let opcode = self.bytecode[ip].clone();
+        let prev_ip = self.ip;
+        opcode.execute(self, heap, mailbox).await?;
+        if self.ip == prev_ip {
+            self.ip += 1;
+        }
 
-        opcode.execute(self, heap, mailbox).await
+        Ok(())
     }
 
     pub fn ip(&self) -> usize {

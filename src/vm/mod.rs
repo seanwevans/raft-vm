@@ -17,6 +17,8 @@ pub use crate::vm::backend::Backend;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::runtime::Runtime;
+    use tokio::sync::mpsc;
 
     #[test]
     fn test_basic_arithmetic() {
@@ -26,9 +28,16 @@ mod tests {
             OpCode::Add,
         ];
 
-        let mut vm = VM::new(code);
-        vm.run().unwrap();
+        let mut ctx = ExecutionContext::new(code);
+        let mut heap = Heap::new();
+        let (_tx, mut mailbox) = mpsc::channel(1);
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async {
+            while ctx.ip() < ctx.bytecode.len() {
+                ctx.step(&mut heap, &mut mailbox).await.unwrap();
+            }
+        });
 
-        assert_eq!(vm.stack.pop(), Some(Value::Integer(8)));
+        assert_eq!(ctx.stack.pop(), Some(Value::Integer(8)));
     }
 }

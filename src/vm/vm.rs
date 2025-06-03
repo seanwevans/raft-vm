@@ -65,7 +65,8 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::opcodes::Value;
+    use crate::vm::value::Value;
+    use tokio::runtime::Runtime;
 
     #[test]
     fn test_basic_arithmetic() {
@@ -75,8 +76,9 @@ mod tests {
             OpCode::Add,
         ];
 
-        let mut vm = VM::new(code, Arc::new(Mutex::new(vec![])), None, Backend::default());
-        vm.run().unwrap();
+        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async { vm.run().await.unwrap(); });
 
         assert_eq!(vm.execution.stack.pop(), Some(Value::Integer(8)));
     }
