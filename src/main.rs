@@ -19,6 +19,9 @@ use raft::vm::VM;
 
 #[tokio::main]
 async fn main() {
+    // Initialize env_logger so log output respects RUST_LOG
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
