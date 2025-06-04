@@ -18,6 +18,8 @@ pub use crate::vm::vm::VM;
 mod tests {
     use super::*;
 
+    use crate::vm::backend::Backend;
+
     #[tokio::test]
     async fn test_basic_arithmetic() {
         let code = vec![

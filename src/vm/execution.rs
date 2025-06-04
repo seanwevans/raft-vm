@@ -54,6 +54,8 @@ impl ExecutionContext {
 
         // Clone the opcode to avoid immutable borrow issues.
         let opcode = self.bytecode[ip].clone();
+        // advance instruction pointer unless opcode modified it
+        self.ip += 1;
 
         opcode.execute(self, heap, mailbox).await?;
 

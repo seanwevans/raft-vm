@@ -39,6 +39,10 @@ impl VM {
         )
     }
 
+    pub fn pop_stack(&mut self) -> Option<Value> {
+        self.execution.stack.pop()
+    }
+
     pub async fn run(&mut self) -> Result<(), String> {
         if self.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
@@ -72,6 +76,7 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::backend::Backend;
     use crate::vm::value::Value;
 
     #[tokio::test]
