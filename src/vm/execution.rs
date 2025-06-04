@@ -2,12 +2,11 @@
 
 use std::collections::HashMap;
 
-use crate::vm::value::Value;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::OpCode;
+use crate::vm::value::Value;
 
 use tokio::sync::mpsc::Receiver;
-
 
 #[derive(Debug)]
 pub struct Frame {
@@ -24,7 +23,6 @@ pub struct ExecutionContext {
     pub bytecode: Vec<OpCode>,
 }
 
-
 impl ExecutionContext {
     pub fn new(bytecode: Vec<OpCode>) -> Self {
         Self {
@@ -35,7 +33,7 @@ impl ExecutionContext {
             bytecode,
         }
     }
-    
+
     pub async fn step(
         &mut self,
         heap: &mut Heap,
@@ -45,10 +43,10 @@ impl ExecutionContext {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
             return Err("Execution out of bounds".to_string());
         }
-        
+
         let opcode = self.bytecode[self.ip];
         log::info!("Executing opcode: {:?}", opcode);
-        
+
         let stack = &mut self.stack;
         let call_stack = &mut self.call_stack;
         let ip = self.ip;
@@ -56,6 +54,14 @@ impl ExecutionContext {
 
         // Clone the opcode to avoid immutable borrow issues.
         let opcode = self.bytecode[ip].clone();
+        // advance instruction pointer unless opcode modified it
+        self.ip += 1;
+
+        opcode.execute(self, heap, mailbox).await?;
+
+        if self.ip == ip {
+            self.ip += 1;
+        }
 
         let prev_ip = self.ip;
         let result = opcode.execute(self, heap, mailbox).await;
@@ -65,6 +71,7 @@ impl ExecutionContext {
         }
 
         result
+
     }
 
     pub fn ip(&self) -> usize {

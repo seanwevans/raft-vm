@@ -1,12 +1,12 @@
 // src/vm/vm.rs
 
+use crate::vm::backend::Backend;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::Heap;
-use crate::vm::value::Value;
-use crate::vm::backend::Backend;
 use crate::vm::opcodes::OpCode;
+use crate::vm::value::Value;
 
-use tokio::sync::mpsc::{self, Sender, Receiver};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 #[derive(Debug)]
 pub struct VM {
@@ -20,20 +20,27 @@ pub struct VM {
 
 impl VM {
     pub fn new(
-        bytecode: Vec<OpCode>,        
+        bytecode: Vec<OpCode>,
         supervisor: Option<Sender<usize>>,
         backend: Backend,
     ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
-        (VM {
-            execution: ExecutionContext::new(bytecode.clone()),            
-            heap: Heap::new(),
-            bytecode,
-            mailbox: rx,
-            supervisor,
-            backend,
-        }, tx)
+        (
+            VM {
+                execution: ExecutionContext::new(bytecode.clone()),
+                heap: Heap::new(),
+                bytecode,
+                mailbox: rx,
+                supervisor,
+                backend,
+            },
+            tx,
+        )
+    }
+
+    pub fn pop_stack(&mut self) -> Option<Value> {
+        self.execution.stack.pop()
     }
 
     pub async fn run(&mut self) -> Result<(), String> {
@@ -41,7 +48,7 @@ impl VM {
             log::warn!("Attempted to run VM with empty bytecode");
             return Err("No bytecode to execute".to_string());
         }
-        
+
         while self.execution.ip < self.bytecode.len() {
             if let Err(e) = self.execution.step(&mut self.heap, &mut self.mailbox).await {
                 log::error!("Execution error at ip {}: {}", self.execution.ip, e);
@@ -51,8 +58,12 @@ impl VM {
         log::info!("VM execution completed successfully");
         Ok(())
     }
-    
-    
+
+    /// Expose a reference to the execution stack for testing or inspection.
+    pub fn stack(&self) -> &Vec<Value> {
+        &self.execution.stack
+    }
+
     pub fn set_strategy(&mut self, _strategy: usize) {
         log::info!("Set supervisor strategy to {}", _strategy);
     }
@@ -65,6 +76,7 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::backend::Backend;
     use crate::vm::value::Value;
 
     #[tokio::test]
@@ -77,6 +89,7 @@ mod tests {
 
         let (mut vm, _tx) = VM::new(code, None, Backend::default());
         vm.run().await.unwrap();
+
 
         match vm.execution.stack.pop() {
             Some(Value::Integer(8)) => {}
@@ -132,6 +145,6 @@ mod tests {
         ctx.step(&mut heap, &mut rx).await.unwrap();
         assert_eq!(ctx.ip, 2);
         assert_eq!(ctx.call_stack, vec![0]);
+
     }
 }
-

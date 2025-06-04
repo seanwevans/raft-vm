@@ -19,6 +19,9 @@ use raft::vm::VM;
 
 #[tokio::main]
 async fn main() {
+    // Initialize env_logger so log output respects RUST_LOG
+    env_logger::init();
+
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -91,8 +94,7 @@ async fn start_repl() {
 
 
 fn unknown_command(cmd: &str) -> ! {
-    eprintln!("Unknown command: {}
-Usage: raft [run <filename>|repl|--version]", cmd);
+    eprintln!("Unknown command: {}\nUsage: raft [run <filename>|repl|--version]", cmd);
     process::exit(1);
 }
 
