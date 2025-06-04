@@ -68,14 +68,22 @@ cargo run -- repl
 cargo run -- --version
 ```
 
+Logging is controlled via the `RUST_LOG` environment variable. Enable info-level
+output like so:
+
+```
+RUST_LOG=info cargo run -- run script.raft
+```
+
 Example `.raft` file:
 ```
-actor Main {
-    let x = 5;
-    let y = 10;
-    send self (x + y);
-}
+# push 1 and 2 on the stack and add them
+1 2 +
 ```
+
+The current compiler only tokenizes whitespace separated integers and
+the `+` operator. Running the above file will leave `3` on the VM's
+stack.
 
 ---
 
@@ -120,3 +128,23 @@ Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
 
 ---
+
+
+## Testing
+Run the test suite with Cargo:
+
+```bash
+cargo test
+```
+
+Build the project in release mode:
+
+```bash
+cargo build --release
+```
+
+## Contributing
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.

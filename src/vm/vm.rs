@@ -1,12 +1,12 @@
 // src/vm/vm.rs
 
+use crate::vm::backend::Backend;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::Heap;
-use crate::vm::value::Value;
-use crate::vm::backend::Backend;
 use crate::vm::opcodes::OpCode;
+use crate::vm::value::Value;
 
-use tokio::sync::mpsc::{self, Sender, Receiver};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 #[derive(Debug)]
 pub struct VM {
@@ -26,14 +26,17 @@ impl VM {
     ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
-        (VM {
-            execution: ExecutionContext::new(bytecode.clone()),            
-            heap: Heap::new(),
-            bytecode,
-            mailbox: rx,
-            supervisor,
-            backend,
-        }, tx)
+        (
+            VM {
+                execution: ExecutionContext::new(bytecode.clone()),
+                heap: Heap::new(),
+                bytecode,
+                mailbox: rx,
+                supervisor,
+                backend,
+            },
+            tx,
+        )
     }
 
     pub fn pop_stack(&mut self) -> Option<Value> {
@@ -45,7 +48,7 @@ impl VM {
             log::warn!("Attempted to run VM with empty bytecode");
             return Err("No bytecode to execute".to_string());
         }
-        
+
         while self.execution.ip < self.bytecode.len() {
             if let Err(e) = self.execution.step(&mut self.heap, &mut self.mailbox).await {
                 log::error!("Execution error at ip {}: {}", self.execution.ip, e);
@@ -55,8 +58,12 @@ impl VM {
         log::info!("VM execution completed successfully");
         Ok(())
     }
-    
-    
+
+    /// Expose a reference to the execution stack for testing or inspection.
+    pub fn stack(&self) -> &Vec<Value> {
+        &self.execution.stack
+    }
+
     pub fn set_strategy(&mut self, _strategy: usize) {
         log::info!("Set supervisor strategy to {}", _strategy);
     }
@@ -80,10 +87,9 @@ mod tests {
             OpCode::Add,
         ];
 
-        let (mut vm, _) = VM::new(code, None, Backend::default());
+        let (mut vm, _tx) = VM::new(code, None, Backend::default());
         vm.run().await.unwrap();
 
-        assert_eq!(vm.pop_stack(), Some(Value::Integer(8)));
+        assert_eq!(vm.stack().last().cloned(), Some(Value::Integer(8)));
     }
 }
-

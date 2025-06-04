@@ -3,4 +3,5 @@
 *.lock
 docs/*
 examples/*
+!examples/add.raft
 tests/*

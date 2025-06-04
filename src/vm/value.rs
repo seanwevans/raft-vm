@@ -11,7 +11,6 @@ pub enum Value {
     Null,
 }
 
-
 impl Value {
     pub fn add(self, other: Value) -> Result<Value, String> {
         match (self, other) {

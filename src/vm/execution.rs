@@ -2,12 +2,11 @@
 
 use std::collections::HashMap;
 
-use crate::vm::value::Value;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::OpCode;
+use crate::vm::value::Value;
 
 use tokio::sync::mpsc::Receiver;
-
 
 #[derive(Debug)]
 pub struct Frame {
@@ -24,7 +23,6 @@ pub struct ExecutionContext {
     pub bytecode: Vec<OpCode>,
 }
 
-
 impl ExecutionContext {
     pub fn new(bytecode: Vec<OpCode>) -> Self {
         Self {
@@ -35,7 +33,7 @@ impl ExecutionContext {
             bytecode,
         }
     }
-    
+
     pub async fn step(
         &mut self,
         heap: &mut Heap,
@@ -45,7 +43,7 @@ impl ExecutionContext {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
             return Err("Execution out of bounds".to_string());
         }
-        
+
         let opcode = self.bytecode[self.ip];
         log::info!("Executing opcode: {:?}", opcode);
 
@@ -59,7 +57,13 @@ impl ExecutionContext {
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
 
-        opcode.execute(self, heap, mailbox).await
+        opcode.execute(self, heap, mailbox).await?;
+
+        if self.ip == ip {
+            self.ip += 1;
+        }
+
+        Ok(())
     }
 
     pub fn ip(&self) -> usize {
