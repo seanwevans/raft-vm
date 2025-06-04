@@ -68,6 +68,13 @@ cargo run -- repl
 cargo run -- --version
 ```
 
+Logging is controlled via the `RUST_LOG` environment variable. Enable info-level
+output like so:
+
+```
+RUST_LOG=info cargo run -- run script.raft
+```
+
 Example `.raft` file:
 ```
 # push 1 and 2 on the stack and add them
