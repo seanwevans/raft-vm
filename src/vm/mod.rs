@@ -14,6 +14,7 @@ pub use crate::vm::opcodes::OpCode;
 pub use crate::vm::value::Value;
 pub use crate::vm::vm::VM;
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
