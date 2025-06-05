@@ -14,8 +14,8 @@ pub struct VM {
     heap: Heap,
     bytecode: Vec<OpCode>,
     pub mailbox: Receiver<Value>,
-    supervisor: Option<Sender<usize>>,
-    backend: Backend,
+    _supervisor: Option<Sender<usize>>,
+    _backend: Backend,
 }
 
 impl VM {
@@ -32,8 +32,8 @@ impl VM {
                 heap: Heap::new(),
                 bytecode,
                 mailbox: rx,
-                supervisor,
-                backend,
+                _supervisor: supervisor,
+                _backend: backend,
             },
             tx,
         )

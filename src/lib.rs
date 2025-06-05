@@ -25,7 +25,7 @@ pub async fn run(source: &str) -> Result<(), String> {
         }
     };
 
-    let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+    let (mut vm, _tx) = VM::new(bytecode, None, Backend::default());
     match vm.run().await {
         Ok(_) => {
             log::info!("Program executed successfully");

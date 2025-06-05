@@ -47,10 +47,10 @@ impl ExecutionContext {
         let opcode = self.bytecode[self.ip];
         log::info!("Executing opcode: {:?}", opcode);
 
-        let stack = &mut self.stack;
-        let call_stack = &mut self.call_stack;
+        let _stack = &mut self.stack;
+        let _call_stack = &mut self.call_stack;
         let ip = self.ip;
-        let locals = &mut self.locals;
+        let _locals = &mut self.locals;
 
         // Clone the opcode to avoid immutable borrow issues.
         let opcode = self.bytecode[ip].clone();
