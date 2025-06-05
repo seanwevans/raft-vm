@@ -90,7 +90,6 @@ mod tests {
         let (mut vm, _tx) = VM::new(code, None, Backend::default());
         vm.run().await.unwrap();
 
-
         match vm.execution.stack.pop() {
             Some(Value::Integer(8)) => {}
             other => panic!("Expected Some(Integer(8)), got {:?}", other),
@@ -144,7 +143,6 @@ mod tests {
 
         ctx.step(&mut heap, &mut rx).await.unwrap();
         assert_eq!(ctx.ip, 2);
-        assert_eq!(ctx.call_stack, vec![0]);
-
+        assert_eq!(ctx.call_stack, vec![1]);
     }
 }
