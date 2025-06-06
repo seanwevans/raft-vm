@@ -44,7 +44,7 @@ impl ExecutionContext {
             return Err("Execution out of bounds".to_string());
         }
 
-        let opcode = self.bytecode[self.ip];
+        let opcode = self.bytecode[self.ip].clone();
         log::info!("Executing opcode: {:?}", opcode);
 
         let _stack = &mut self.stack;
@@ -57,21 +57,7 @@ impl ExecutionContext {
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
 
-        opcode.execute(self, heap, mailbox).await?;
-
-        if self.ip == ip {
-            self.ip += 1;
-        }
-
-        let prev_ip = self.ip;
-        let result = opcode.execute(self, heap, mailbox).await;
-
-        if self.ip == prev_ip {
-            self.ip += 1;
-        }
-
-        result
-
+        opcode.execute(self, heap, mailbox).await
     }
 
     pub fn ip(&self) -> usize {
