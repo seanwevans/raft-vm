@@ -79,7 +79,7 @@ impl OpCode {
     pub async fn execute(
         &self,
         execution: &mut ExecutionContext,        
-        heap: &mut Heap,
+        _heap: &mut Heap,
         mailbox: &mut Receiver<Value>,        
     ) -> Result<(), String> {        
         match self {

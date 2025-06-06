@@ -47,7 +47,14 @@ impl ExecutionContext {
         let opcode = self.bytecode[self.ip].clone();
         log::info!("Executing opcode: {:?}", opcode);
 
-        // advance instruction pointer before execution unless the opcode modifies it
+        let _stack = &mut self.stack;
+        let _call_stack = &mut self.call_stack;
+        let ip = self.ip;
+        let _locals = &mut self.locals;
+
+        // Clone the opcode to avoid immutable borrow issues.
+        let opcode = self.bytecode[ip].clone();
+        // advance instruction pointer unless opcode modified it
         self.ip += 1;
 
         opcode.execute(self, heap, mailbox).await
