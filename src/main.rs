@@ -6,8 +6,8 @@
 //   $ raft version
 //   $ raft help [command]
 
+use clap::{CommandFactory, Parser, Subcommand};
 use raft::{self, run};
-use std::env;
 use std::fs;
 use std::process;
 
@@ -16,58 +16,69 @@ use raft::vm::backend::Backend;
 use raft::compiler::Compiler;
 use raft::vm::VM;
 
+#[derive(Parser)]
+#[command(name = "raft", version = raft::VERSION, about = "Raft command line interface")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Execute a Raft source file
+    Run {
+        /// Path to the source file
+        filename: String,
+    },
+    /// Start the interactive REPL
+    Repl,
+    /// Print version information
+    Version,
+}
+
 
 #[tokio::main]
 async fn main() {
     // Initialize env_logger so log output respects RUST_LOG
     env_logger::init();
 
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 2 {
-        print_usage_and_exit();
-    }
-
-    match args[1].as_str() {
-        "help" | "--help" | "-?" => print_help(),
-        "version" | "--version" | "-v" => print_version(),
-        "run" => handle_run(&args).await,
-        "repl" => start_repl().await,
-        cmd => unknown_command(cmd),
+    match cli.command {
+        Some(Commands::Run { filename }) => handle_run(&filename).await,
+        Some(Commands::Repl) => start_repl().await,
+        Some(Commands::Version) => print_version(),
+        None => print_help(),
     }
 }
 
 fn print_help() {
-    println!("HALP");
+    Cli::command().print_long_help().unwrap();
+    println!();
 }
 
 fn print_version() {
     println!("Raft version {}", raft::VERSION);
 }
 
-async fn handle_run(args: &[String]) {
-    if let Some(filename) = args.get(2) {
-        match fs::read_to_string(filename) {
-            Ok(source) => {
-                let bytecode = Compiler::compile(&source).unwrap();
-                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+async fn handle_run(filename: &str) {
+    match fs::read_to_string(filename) {
+        Ok(source) => {
+            let bytecode = Compiler::compile(&source).unwrap();
+            let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
 
-                // Simulate sending messages to the VM
-                tokio::spawn(async move {
-                    tx.send(Value::Integer(42)).await.unwrap();
-                    tx.send(Value::Boolean(true)).await.unwrap();
-                });
+            // Simulate sending messages to the VM
+            tokio::spawn(async move {
+                tx.send(Value::Integer(42)).await.unwrap();
+                tx.send(Value::Boolean(true)).await.unwrap();
+            });
 
-                if let Err(e) = vm.run().await {
-                    eprintln!("Execution error: {}", e);
-                    process::exit(1);
-                }
+            if let Err(e) = vm.run().await {
+                eprintln!("Execution error: {}", e);
+                process::exit(1);
             }
-            Err(e) => handle_file_error(e),
         }
-    } else {
-        eprintln!("Error: Missing filename.");
-        print_usage_and_exit();
+        Err(e) => handle_file_error(e),
     }
 }
 
@@ -93,12 +104,3 @@ async fn start_repl() {
 }
 
 
-fn unknown_command(cmd: &str) -> ! {
-    eprintln!("Unknown command: {}\nUsage: raft [run <filename>|repl|--version]", cmd);
-    process::exit(1);
-}
-
-fn print_usage_and_exit() -> ! {
-    eprintln!("Usage: raft [run <filename>|repl|--version]");
-    process::exit(1);
-}
