@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::OpCode;
 use crate::vm::value::Value;
@@ -38,10 +39,10 @@ impl ExecutionContext {
         &mut self,
         heap: &mut Heap,
         mailbox: &mut Receiver<Value>,
-    ) -> Result<(), String> {
+    ) -> Result<(), VmError> {
         if self.ip >= self.bytecode.len() {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
-            return Err("Execution out of bounds".to_string());
+            return Err("Execution out of bounds".into());
         }
 
         let opcode = self.bytecode[self.ip].clone();
