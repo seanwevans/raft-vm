@@ -1,8 +1,10 @@
 // src/vm/heap.rs
 
 use std::collections::HashMap;
+
 use crate::vm::value::Value;
 use crate::vm::VM;
+use tokio::sync::mpsc::Sender;
 
 
 #[derive(Debug)]
@@ -25,8 +27,8 @@ pub enum HeapObject {
     String(String),
     Module { name: String, exports: HashMap<String, Value> },
     NativeFunction(NativeFunction),
-    Actor(VM),
-    Supervisor(VM),
+    Actor(VM, Sender<Value>),
+    Supervisor(VM, Sender<Value>),
 }
 
 
