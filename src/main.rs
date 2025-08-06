@@ -11,30 +11,13 @@ use raft::{self, run};
 use std::fs;
 use std::process;
 
-use raft::vm::value::Value;
-use raft::vm::backend::Backend;
 use raft::compiler::Compiler;
+use raft::vm::backend::Backend;
+use raft::vm::value::Value;
 use raft::vm::VM;
 
-#[derive(Parser)]
-#[command(name = "raft", version = raft::VERSION, about = "Raft command line interface")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Execute a Raft source file
-    Run {
-        /// Path to the source file
-        filename: String,
-    },
-    /// Start the interactive REPL
-    Repl,
-    /// Print version information
-    Version,
-}
+use std::io::Write;
+use tokio::io::{self, AsyncBufReadExt};
 
 
 #[tokio::main]
@@ -82,17 +65,25 @@ async fn handle_run(filename: &str) {
     }
 }
 
-
 fn handle_file_error(e: std::io::Error) -> ! {
     eprintln!("File error: {}", e);
     process::exit(1);
 }
 
 async fn start_repl() {
+    let stdin = io::stdin();
+    let mut reader = io::BufReader::new(stdin);
+    let mut input = String::new();
+
     loop {
         print!("raft> ");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
+        std::io::stdout().flush().unwrap();
+        input.clear();
+
+        if reader.read_line(&mut input).await.unwrap() == 0 {
+            break;
+        }
+
         if input.trim() == "exit" {
             break;
         }
@@ -104,3 +95,15 @@ async fn start_repl() {
 }
 
 
+fn unknown_command(cmd: &str) -> ! {
+    eprintln!(
+        "Unknown command: {}\nUsage: raft [run <filename>|repl|--version]",
+        cmd
+    );
+    process::exit(1);
+}
+
+fn print_usage_and_exit() -> ! {
+    eprintln!("Usage: raft [run <filename>|repl|--version]");
+    process::exit(1);
+}
