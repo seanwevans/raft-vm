@@ -1,6 +1,7 @@
 // src/vm/mod.rs
 
 pub mod backend;
+pub mod error;
 pub mod execution;
 pub mod heap;
 pub mod opcodes;
@@ -8,12 +9,12 @@ pub mod value;
 pub mod vm;
 
 pub use crate::vm::backend::Backend;
+pub use crate::vm::error::VmError;
 pub use crate::vm::execution::ExecutionContext;
 pub use crate::vm::heap::{Heap, HeapObject};
 pub use crate::vm::opcodes::OpCode;
 pub use crate::vm::value::Value;
 pub use crate::vm::vm::VM;
-
 
 #[cfg(test)]
 mod tests {

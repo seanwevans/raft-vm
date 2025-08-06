@@ -1,6 +1,7 @@
 // src/vm/vm.rs
 
 use crate::vm::backend::Backend;
+use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::OpCode;
@@ -43,10 +44,10 @@ impl VM {
         self.execution.stack.pop()
     }
 
-    pub async fn run(&mut self) -> Result<(), String> {
+    pub async fn run(&mut self) -> Result<(), VmError> {
         if self.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
-            return Err("No bytecode to execute".to_string());
+            return Err("No bytecode to execute".into());
         }
 
         while self.execution.ip < self.bytecode.len() {

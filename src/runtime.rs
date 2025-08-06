@@ -2,6 +2,7 @@
 
 use tokio::sync::mpsc::Sender;
 
+use crate::vm::error::VmError;
 use crate::vm::value::Value;
 use crate::vm::{Backend, OpCode, VM};
 
@@ -25,12 +26,15 @@ impl Actor {
     }
 
     /// Send a message to the actor's mailbox.
-    pub async fn send(&self, msg: Value) -> Result<(), String> {
-        self.sender.send(msg).await.map_err(|e| e.to_string())
+    pub async fn send(&self, msg: Value) -> Result<(), VmError> {
+        self.sender
+            .send(msg)
+            .await
+            .map_err(|e| VmError::from(e.to_string()))
     }
 
     /// Execute the actor until its VM halts.
-    pub async fn run(&mut self) -> Result<(), String> {
+    pub async fn run(&mut self) -> Result<(), VmError> {
         self.vm.run().await
     }
 

@@ -1,14 +1,14 @@
 // src/vm/opcodes.rs
 
+use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
-use crate::vm::heap::{Heap};
+use crate::vm::heap::Heap;
 use crate::vm::value::Value;
 use tokio::sync::mpsc::Receiver;
 
-
-fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
+fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
 where
-    F: Fn(Value) -> Result<Value, String>,
+    F: Fn(Value) -> Result<Value, VmError>,
 {
     if let Some(v) = stack.pop() {
         let result = f(v)?;
@@ -16,18 +16,17 @@ where
         Ok(())
     } else {
         log::error!("Stack underflow during unary operation");
-        Err("Stack underflow for unary operation".to_string())
+        Err("Stack underflow for unary operation".into())
     }
 }
 
-
-fn binary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), String>
+fn binary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
 where
-    F: Fn(Value, Value) -> Result<Value, String>,
+    F: Fn(Value, Value) -> Result<Value, VmError>,
 {
     if stack.len() < 2 {
         log::error!("Stack underflow during binary operation");
-        return Err("Stack underflow for binary operation".to_string());
+        return Err("Stack underflow for binary operation".into());
     }
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
@@ -41,14 +40,14 @@ pub enum OpCode {
     // Variables
     StoreVar(usize),
     LoadVar(usize),
-    
+
     // Stack
     PushConst(Value),
     Pop,
     Dup,
     Swap,
     Peek,
-    
+
     // Arithmetic
     Add,
     Sub,
@@ -57,18 +56,18 @@ pub enum OpCode {
     Mod,
     Neg,
     Exp,
-    
+
     // Control Flow
     Jump(usize),
     JumpIfFalse(usize),
     Call(usize),
     Return,
-    
+
     // Actors
     SpawnActor(usize),
     SendMessage(usize),
     ReceiveMessage,
-    
+
     // Supervisor
     SpawnSupervisor(usize),
     SetStrategy(usize),
@@ -78,10 +77,10 @@ pub enum OpCode {
 impl OpCode {
     pub async fn execute(
         &self,
-        execution: &mut ExecutionContext,        
+        execution: &mut ExecutionContext,
         _heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,        
-    ) -> Result<(), String> {        
+        mailbox: &mut Receiver<Value>,
+    ) -> Result<(), VmError> {
         match self {
             OpCode::Add => binary_op(&mut execution.stack, |a, b| a.add(b)),
             OpCode::Sub => binary_op(&mut execution.stack, |a, b| a.sub(b)),
@@ -90,26 +89,30 @@ impl OpCode {
             OpCode::Neg => unary_op(&mut execution.stack, |a| match a {
                 Value::Integer(i) => Ok(Value::Integer(-i)),
                 Value::Float(f) => Ok(Value::Float(-f)),
-                _ => Err("Cannot negate non-numeric value".to_string()),
+                _ => Err("Cannot negate non-numeric value".into()),
             }),
             OpCode::PushConst(v) => {
                 execution.stack.push(*v);
                 Ok(())
             }
             OpCode::Pop => {
-                execution.stack.pop().ok_or("Stack underflow".to_string()).map(|_| ())
+                execution
+                    .stack
+                    .pop()
+                    .ok_or_else(|| VmError::from("Stack underflow"))?;
+                Ok(())
             }
             OpCode::Dup => {
                 if let Some(&v) = execution.stack.last() {
                     execution.stack.push(v);
                     Ok(())
                 } else {
-                    Err("Stack underflow".to_string())
+                    Err("Stack underflow".into())
                 }
             }
             OpCode::Swap => {
                 if execution.stack.len() < 2 {
-                    return Err("Stack underflow for Swap".to_string());
+                    return Err("Stack underflow for Swap".into());
                 }
                 let len = execution.stack.len();
                 execution.stack.swap(len - 1, len - 2);
@@ -120,7 +123,7 @@ impl OpCode {
                     execution.locals.insert(*index, value);
                     Ok(())
                 } else {
-                    Err("Stack underflow for StoreVar".to_string())
+                    Err("Stack underflow for StoreVar".into())
                 }
             }
             OpCode::Peek => {
@@ -128,7 +131,7 @@ impl OpCode {
                     execution.stack.push(*v);
                     Ok(())
                 } else {
-                    Err("Stack underflow for Peek".to_string())
+                    Err("Stack underflow for Peek".into())
                 }
             }
             OpCode::LoadVar(index) => {
@@ -136,23 +139,23 @@ impl OpCode {
                     execution.stack.push(*value);
                     Ok(())
                 } else {
-                    Err(format!("Variable at index {} not found", index))
+                    Err(format!("Variable at index {} not found", index).into())
                 }
             }
             OpCode::Mod => binary_op(&mut execution.stack, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
                     if y == 0 {
-                        Err("Modulo by zero".to_string())
+                        Err("Modulo by zero".into())
                     } else {
                         Ok(Value::Integer(x % y))
                     }
                 }
-                _ => Err("Type mismatch for Mod".to_string()),
+                _ => Err("Type mismatch for Mod".into()),
             }),
             OpCode::Exp => binary_op(&mut execution.stack, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => Ok(Value::Integer(x.pow(y as u32))),
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.powf(y))),
-                _ => Err("Type mismatch for Exp".to_string()),
+                _ => Err("Type mismatch for Exp".into()),
             }),
             OpCode::Jump(target) => {
                 execution.ip = *target;
@@ -174,7 +177,7 @@ impl OpCode {
                     execution.ip = return_addr;
                     Ok(())
                 } else {
-                    Err("Call stack underflow on Return".to_string())
+                    Err("Call stack underflow on Return".into())
                 }
             }
             OpCode::ReceiveMessage => {
@@ -184,10 +187,10 @@ impl OpCode {
                     Ok(())
                 } else {
                     log::warn!("Mailbox is empty or closed");
-                    Err("Mailbox empty".to_string())
+                    Err("Mailbox empty".into())
                 }
-            }            
-            _ => Err("Opcode not implemented".to_string()),
+            }
+            _ => Err("Opcode not implemented".into()),
         }
     }
 }
