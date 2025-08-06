@@ -11,11 +11,12 @@ use std::env;
 use std::fs;
 use std::process;
 
-use raft::vm::value::Value;
-use raft::vm::backend::Backend;
 use raft::compiler::Compiler;
+use raft::vm::backend::Backend;
+use raft::vm::value::Value;
 use raft::vm::VM;
-
+use std::io::Write;
+use tokio::io::{self, AsyncBufReadExt};
 
 #[tokio::main]
 async fn main() {
@@ -71,17 +72,25 @@ async fn handle_run(args: &[String]) {
     }
 }
 
-
 fn handle_file_error(e: std::io::Error) -> ! {
     eprintln!("File error: {}", e);
     process::exit(1);
 }
 
 async fn start_repl() {
+    let stdin = io::stdin();
+    let mut reader = io::BufReader::new(stdin);
+    let mut input = String::new();
+
     loop {
         print!("raft> ");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
+        std::io::stdout().flush().unwrap();
+        input.clear();
+
+        if reader.read_line(&mut input).await.unwrap() == 0 {
+            break;
+        }
+
         if input.trim() == "exit" {
             break;
         }
@@ -92,9 +101,11 @@ async fn start_repl() {
     }
 }
 
-
 fn unknown_command(cmd: &str) -> ! {
-    eprintln!("Unknown command: {}\nUsage: raft [run <filename>|repl|--version]", cmd);
+    eprintln!(
+        "Unknown command: {}\nUsage: raft [run <filename>|repl|--version]",
+        cmd
+    );
     process::exit(1);
 }
 
