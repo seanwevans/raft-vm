@@ -43,6 +43,10 @@ impl VM {
         self.execution.stack.pop()
     }
 
+    pub fn set_ip(&mut self, ip: usize) {
+        self.execution.ip = ip;
+    }
+
     pub async fn run(&mut self) -> Result<(), String> {
         if self.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
@@ -144,5 +148,38 @@ mod tests {
         ctx.step(&mut heap, &mut rx).await.unwrap();
         assert_eq!(ctx.ip, 2);
         assert_eq!(ctx.call_stack, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_spawn_actor_and_message_delivery() {
+        use crate::vm::HeapObject;
+
+        // Parent code: send 42 to spawned actor
+        let code = vec![
+            OpCode::PushConst(Value::Integer(42)), // message
+            OpCode::SpawnActor(4),                 // spawn actor starting at 4
+            OpCode::SendMessage(0),                // send message
+            OpCode::Jump(5),                       // skip child code
+            // Child actor code starts here (index 4)
+            OpCode::ReceiveMessage,
+        ];
+
+        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+        vm.run().await.unwrap();
+
+        // Actor reference should remain on stack after sending
+        let actor_addr = match vm.pop_stack() {
+            Some(Value::Reference(addr)) => addr,
+            other => panic!("Expected actor reference, got {:?}", other),
+        };
+
+        // Retrieve actor from heap and run it to process message
+        let actor_entry = vm.heap.get_mut(actor_addr).expect("actor not found");
+        if let HeapObject::Actor(actor_vm, _sender) = actor_entry {
+            actor_vm.run().await.unwrap();
+            assert_eq!(actor_vm.pop_stack(), Some(Value::Integer(42)));
+        } else {
+            panic!("Expected HeapObject::Actor");
+        }
     }
 }
