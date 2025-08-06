@@ -4,6 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::Heap;
 use crate::vm::value::Value;
+use crate::vm::{backend::Backend, vm::VM};
 use tokio::sync::mpsc::Receiver;
 
 fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
@@ -190,7 +191,84 @@ impl OpCode {
                     Err("Mailbox empty".into())
                 }
             }
+
             _ => Err("Opcode not implemented".into()),
+
+            OpCode::SpawnActor(addr) => {
+                let bytecode = execution.bytecode.clone();
+                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+                vm.set_ip(*addr);
+                let address = _heap.allocate(HeapObject::Actor(vm, tx));
+                execution.stack.push(Value::Reference(address));
+                Ok(())
+            }
+            OpCode::SendMessage(_index) => {
+                let actor_ref = execution
+                    .stack
+                    .pop()
+                    .ok_or("Stack underflow for SendMessage".to_string())?;
+                let message = execution
+                    .stack
+                    .pop()
+                    .ok_or("Stack underflow for SendMessage".to_string())?;
+                if let Value::Reference(address) = actor_ref {
+                    if let Some(HeapObject::Actor(_actor_vm, sender)) = _heap.get(address) {
+                        sender
+                            .send(message)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        execution.stack.push(Value::Reference(address));
+                        Ok(())
+                    } else {
+                        Err("Invalid actor reference".to_string())
+                    }
+                } else {
+                    Err("Invalid actor reference".to_string())
+                }
+            }
+            OpCode::SpawnSupervisor(addr) => {
+                let bytecode = execution.bytecode.clone();
+                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+                vm.set_ip(*addr);
+                let address = _heap.allocate(HeapObject::Supervisor(vm, tx));
+                execution.stack.push(Value::Reference(address));
+                Ok(())
+            }
+            OpCode::SetStrategy(strategy) => {
+                let sup_ref = execution
+                    .stack
+                    .pop()
+                    .ok_or("Stack underflow for SetStrategy".to_string())?;
+                if let Value::Reference(addr) = sup_ref {
+                    if let Some(HeapObject::Supervisor(vm, _)) = _heap.get_mut(addr) {
+                        vm.set_strategy(*strategy);
+                        execution.stack.push(Value::Reference(addr));
+                        Ok(())
+                    } else {
+                        Err("Invalid supervisor reference".to_string())
+                    }
+                } else {
+                    Err("Invalid supervisor reference".to_string())
+                }
+            }
+            OpCode::RestartChild(child) => {
+                let sup_ref = execution
+                    .stack
+                    .pop()
+                    .ok_or("Stack underflow for RestartChild".to_string())?;
+                if let Value::Reference(addr) = sup_ref {
+                    if let Some(HeapObject::Supervisor(vm, _)) = _heap.get_mut(addr) {
+                        vm.restart_child(*child);
+                        execution.stack.push(Value::Reference(addr));
+                        Ok(())
+                    } else {
+                        Err("Invalid supervisor reference".to_string())
+                    }
+                } else {
+                    Err("Invalid supervisor reference".to_string())
+                }
+            }
+
         }
     }
 }

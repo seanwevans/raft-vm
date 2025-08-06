@@ -4,6 +4,8 @@ use crate::vm::error::VmError;
 use crate::vm::value::Value;
 use crate::vm::VM;
 use std::collections::HashMap;
+use tokio::sync::mpsc::Sender;
+
 
 #[derive(Debug)]
 pub struct Heap {
@@ -27,8 +29,8 @@ pub enum HeapObject {
         exports: HashMap<String, Value>,
     },
     NativeFunction(NativeFunction),
-    Actor(VM),
-    Supervisor(VM),
+    Actor(VM, Sender<Value>),
+    Supervisor(VM, Sender<Value>),
 }
 
 impl Heap {
