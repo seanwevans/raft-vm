@@ -5,7 +5,6 @@ use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::value::Value;
 use crate::vm::{backend::Backend, vm::VM};
-use crate::vm::HeapObject;
 use tokio::sync::mpsc::Receiver;
 
 fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
