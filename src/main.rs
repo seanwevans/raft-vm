@@ -109,15 +109,4 @@ async fn start_repl() {
     }
 }
 
-fn unknown_command(cmd: &str) -> ! {
-    eprintln!(
-        "Unknown command: {}\nUsage: raft [run <filename>|repl|--version]",
-        cmd
-    );
-    process::exit(1);
-}
-
-fn print_usage_and_exit() -> ! {
-    eprintln!("Usage: raft [run <filename>|repl|--version]");
-    process::exit(1);
-}
+// Removed unused utility functions that produced dead-code warnings.
