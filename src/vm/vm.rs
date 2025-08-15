@@ -176,7 +176,7 @@ mod tests {
 
         // Retrieve actor from heap and run it to process message
         let actor_entry = vm.heap.get_mut(actor_addr).expect("actor not found");
-        if let HeapObject::Actor(actor_vm, _sender) = actor_entry {
+        if let HeapObject::Actor(actor_vm, _sender, _) = actor_entry {
             actor_vm.run().await.unwrap();
             assert_eq!(actor_vm.pop_stack(), Some(Value::Integer(42)));
         } else {

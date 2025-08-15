@@ -2,7 +2,7 @@
 
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
-use crate::vm::heap::Heap;
+use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::value::Value;
 use crate::vm::{backend::Backend, vm::VM};
 use crate::vm::HeapObject;
@@ -188,7 +188,7 @@ impl OpCode {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
                 vm.set_ip(*addr);
-                let address = _heap.allocate(HeapObject::Actor(vm, tx));
+                let address = _heap.allocate(HeapObject::Actor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
                 Ok(())
             }
@@ -202,25 +202,23 @@ impl OpCode {
                     .pop()
                     .ok_or_else(|| VmError::from("Stack underflow for SendMessage"))?;
                 if let Value::Reference(address) = actor_ref {
-                    if let Some(HeapObject::Actor(_actor_vm, sender)) = _heap.get(address) {
-                        sender
-                            .send(message)
-                            .await
-                            .map_err(|e| e.to_string())?;
+                    if let Some(HeapObject::Actor(_actor_vm, sender, _)) = _heap.get(address) {
+                        sender.send(message).await.map_err(|e| e.to_string())?;
                         execution.stack.push(Value::Reference(address));
                         Ok(())
                     } else {
-                        Err("Invalid actor reference".into())
+                        Err("Invalid actor reference".to_string().into())
                     }
                 } else {
-                    Err("Invalid actor reference".into())
+                    Err("Invalid actor reference".to_string().into())
+
                 }
             }
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
                 vm.set_ip(*addr);
-                let address = _heap.allocate(HeapObject::Supervisor(vm, tx));
+                let address = _heap.allocate(HeapObject::Supervisor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
                 Ok(())
             }
@@ -230,15 +228,16 @@ impl OpCode {
                     .pop()
                     .ok_or_else(|| VmError::from("Stack underflow for SetStrategy"))?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _)) = _heap.get_mut(addr) {
+                    if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.set_strategy(*strategy);
                         execution.stack.push(Value::Reference(addr));
                         Ok(())
                     } else {
-                        Err("Invalid supervisor reference".into())
+                        Err("Invalid supervisor reference".to_string().into())
                     }
                 } else {
-                    Err("Invalid supervisor reference".into())
+                    Err("Invalid supervisor reference".to_string().into())
+
                 }
             }
             OpCode::RestartChild(child) => {
@@ -247,17 +246,20 @@ impl OpCode {
                     .pop()
                     .ok_or_else(|| VmError::from("Stack underflow for RestartChild"))?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _)) = _heap.get_mut(addr) {
+                    if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.restart_child(*child);
                         execution.stack.push(Value::Reference(addr));
                         Ok(())
                     } else {
-                        Err("Invalid supervisor reference".into())
+                        Err("Invalid supervisor reference".to_string().into())
                     }
                 } else {
-                    Err("Invalid supervisor reference".into())
+                    Err("Invalid supervisor reference".to_string().into())
                 }
             }
+
+            _ => Err("Opcode not implemented".into()),
+
         }
     }
 }

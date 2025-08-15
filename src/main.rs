@@ -19,6 +19,19 @@ use raft::vm::VM;
 use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
 
+#[derive(Parser)]
+#[command(name = "raft")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Run { filename: String },
+    Repl,
+    Version,
+}
 
 #[tokio::main]
 async fn main() {
@@ -93,7 +106,6 @@ async fn start_repl() {
         }
     }
 }
-
 
 fn unknown_command(cmd: &str) -> ! {
     eprintln!(
