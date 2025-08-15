@@ -13,7 +13,6 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 pub struct VM {
     execution: ExecutionContext,
     heap: Heap,
-    bytecode: Vec<OpCode>,
     pub mailbox: Receiver<Value>,
     _supervisor: Option<Sender<usize>>,
     _backend: Backend,
@@ -29,9 +28,8 @@ impl VM {
         log::info!("Initializing VM with {} opcodes", bytecode.len());
         (
             VM {
-                execution: ExecutionContext::new(bytecode.clone()),
+                execution: ExecutionContext::new(bytecode),
                 heap: Heap::new(),
-                bytecode,
                 mailbox: rx,
                 _supervisor: supervisor,
                 _backend: backend,
@@ -45,12 +43,12 @@ impl VM {
     }
 
     pub async fn run(&mut self) -> Result<(), VmError> {
-        if self.bytecode.is_empty() {
+        if self.execution.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
             return Err("No bytecode to execute".into());
         }
 
-        while self.execution.ip < self.bytecode.len() {
+        while self.execution.ip < self.execution.bytecode.len() {
             if let Err(e) = self.execution.step(&mut self.heap, &mut self.mailbox).await {
                 log::error!("Execution error at ip {}: {}", self.execution.ip, e);
                 return Err(e);
