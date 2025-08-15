@@ -10,12 +10,6 @@ use crate::vm::value::Value;
 use tokio::sync::mpsc::Receiver;
 
 #[derive(Debug)]
-pub struct Frame {
-    pub return_address: usize,
-    pub locals: HashMap<usize, Value>,
-}
-
-#[derive(Debug)]
 pub struct ExecutionContext {
     pub stack: Vec<Value>,
     pub locals: HashMap<usize, Value>,
