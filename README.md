@@ -122,7 +122,7 @@ raft-vm
 ### Opcodes
 Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Arithmetic**: `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Neg`, `Exp`
-- **Stack**: `PushConst`, `Pop`, `Dup`, `Swap`, `Peek`
+- **Stack**: `PushConst`, `Pop`, `Dup`, `Swap`
 - **Control Flow**: `Jump`, `JumpIfFalse`, `Call`, `Return`
 - **Actor Management**: `SpawnActor`, `SendMessage`, `ReceiveMessage`
 - **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`

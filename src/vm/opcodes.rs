@@ -2,9 +2,10 @@
 
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
-use crate::vm::heap::Heap;
+use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::value::Value;
 use crate::vm::{backend::Backend, vm::VM};
+use crate::vm::HeapObject;
 use tokio::sync::mpsc::Receiver;
 
 fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
@@ -47,7 +48,6 @@ pub enum OpCode {
     Pop,
     Dup,
     Swap,
-    Peek,
 
     // Arithmetic
     Add,
@@ -66,7 +66,7 @@ pub enum OpCode {
 
     // Actors
     SpawnActor(usize),
-    SendMessage(usize),
+    SendMessage,
     ReceiveMessage,
 
     // Supervisor
@@ -127,14 +127,6 @@ impl OpCode {
                     Err("Stack underflow for StoreVar".into())
                 }
             }
-            OpCode::Peek => {
-                if let Some(v) = execution.stack.last() {
-                    execution.stack.push(*v);
-                    Ok(())
-                } else {
-                    Err("Stack underflow for Peek".into())
-                }
-            }
             OpCode::LoadVar(index) => {
                 if let Some(value) = execution.locals.get(index) {
                     execution.stack.push(*value);
@@ -192,45 +184,41 @@ impl OpCode {
                 }
             }
 
-            _ => Err("Opcode not implemented".into()),
-
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
                 vm.set_ip(*addr);
-                let address = _heap.allocate(HeapObject::Actor(vm, tx));
+                let address = _heap.allocate(HeapObject::Actor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
                 Ok(())
             }
-            OpCode::SendMessage(_index) => {
+            OpCode::SendMessage => {
                 let actor_ref = execution
                     .stack
                     .pop()
-                    .ok_or("Stack underflow for SendMessage".to_string())?;
+                    .ok_or_else(|| VmError::from("Stack underflow for SendMessage"))?;
                 let message = execution
                     .stack
                     .pop()
-                    .ok_or("Stack underflow for SendMessage".to_string())?;
+                    .ok_or_else(|| VmError::from("Stack underflow for SendMessage"))?;
                 if let Value::Reference(address) = actor_ref {
-                    if let Some(HeapObject::Actor(_actor_vm, sender)) = _heap.get(address) {
-                        sender
-                            .send(message)
-                            .await
-                            .map_err(|e| e.to_string())?;
+                    if let Some(HeapObject::Actor(_actor_vm, sender, _)) = _heap.get(address) {
+                        sender.send(message).await.map_err(|e| e.to_string())?;
                         execution.stack.push(Value::Reference(address));
                         Ok(())
                     } else {
-                        Err("Invalid actor reference".to_string())
+                        Err("Invalid actor reference".to_string().into())
                     }
                 } else {
-                    Err("Invalid actor reference".to_string())
+                    Err("Invalid actor reference".to_string().into())
+
                 }
             }
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
                 vm.set_ip(*addr);
-                let address = _heap.allocate(HeapObject::Supervisor(vm, tx));
+                let address = _heap.allocate(HeapObject::Supervisor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
                 Ok(())
             }
@@ -238,36 +226,39 @@ impl OpCode {
                 let sup_ref = execution
                     .stack
                     .pop()
-                    .ok_or("Stack underflow for SetStrategy".to_string())?;
+                    .ok_or_else(|| VmError::from("Stack underflow for SetStrategy"))?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _)) = _heap.get_mut(addr) {
+                    if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.set_strategy(*strategy);
                         execution.stack.push(Value::Reference(addr));
                         Ok(())
                     } else {
-                        Err("Invalid supervisor reference".to_string())
+                        Err("Invalid supervisor reference".to_string().into())
                     }
                 } else {
-                    Err("Invalid supervisor reference".to_string())
+                    Err("Invalid supervisor reference".to_string().into())
+
                 }
             }
             OpCode::RestartChild(child) => {
                 let sup_ref = execution
                     .stack
                     .pop()
-                    .ok_or("Stack underflow for RestartChild".to_string())?;
+                    .ok_or_else(|| VmError::from("Stack underflow for RestartChild"))?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _)) = _heap.get_mut(addr) {
+                    if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.restart_child(*child);
                         execution.stack.push(Value::Reference(addr));
                         Ok(())
                     } else {
-                        Err("Invalid supervisor reference".to_string())
+                        Err("Invalid supervisor reference".to_string().into())
                     }
                 } else {
-                    Err("Invalid supervisor reference".to_string())
+                    Err("Invalid supervisor reference".to_string().into())
                 }
             }
+
+            _ => Err("Opcode not implemented".into()),
 
         }
     }

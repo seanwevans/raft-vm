@@ -13,7 +13,6 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 pub struct VM {
     execution: ExecutionContext,
     heap: Heap,
-    bytecode: Vec<OpCode>,
     pub mailbox: Receiver<Value>,
     _supervisor: Option<Sender<usize>>,
     _backend: Backend,
@@ -29,9 +28,8 @@ impl VM {
         log::info!("Initializing VM with {} opcodes", bytecode.len());
         (
             VM {
-                execution: ExecutionContext::new(bytecode.clone()),
+                execution: ExecutionContext::new(bytecode),
                 heap: Heap::new(),
-                bytecode,
                 mailbox: rx,
                 _supervisor: supervisor,
                 _backend: backend,
@@ -44,13 +42,17 @@ impl VM {
         self.execution.stack.pop()
     }
 
+    pub fn set_ip(&mut self, ip: usize) {
+        self.execution.ip = ip;
+    }
+
     pub async fn run(&mut self) -> Result<(), VmError> {
-        if self.bytecode.is_empty() {
+        if self.execution.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
             return Err("No bytecode to execute".into());
         }
 
-        while self.execution.ip < self.bytecode.len() {
+        while self.execution.ip < self.execution.bytecode.len() {
             if let Err(e) = self.execution.step(&mut self.heap, &mut self.mailbox).await {
                 log::error!("Execution error at ip {}: {}", self.execution.ip, e);
                 return Err(e);
@@ -155,7 +157,7 @@ mod tests {
         let code = vec![
             OpCode::PushConst(Value::Integer(42)), // message
             OpCode::SpawnActor(4),                 // spawn actor starting at 4
-            OpCode::SendMessage(0),                // send message
+            OpCode::SendMessage,                // send message
             OpCode::Jump(5),                       // skip child code
             // Child actor code starts here (index 4)
             OpCode::ReceiveMessage,
@@ -172,7 +174,7 @@ mod tests {
 
         // Retrieve actor from heap and run it to process message
         let actor_entry = vm.heap.get_mut(actor_addr).expect("actor not found");
-        if let HeapObject::Actor(actor_vm, _sender) = actor_entry {
+        if let HeapObject::Actor(actor_vm, _sender, _) = actor_entry {
             actor_vm.run().await.unwrap();
             assert_eq!(actor_vm.pop_stack(), Some(Value::Integer(42)));
         } else {
