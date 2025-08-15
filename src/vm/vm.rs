@@ -44,6 +44,10 @@ impl VM {
         self.execution.stack.pop()
     }
 
+    pub fn set_ip(&mut self, ip: usize) {
+        self.execution.ip = ip;
+    }
+
     pub async fn run(&mut self) -> Result<(), VmError> {
         if self.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
@@ -155,7 +159,7 @@ mod tests {
         let code = vec![
             OpCode::PushConst(Value::Integer(42)), // message
             OpCode::SpawnActor(4),                 // spawn actor starting at 4
-            OpCode::SendMessage(0),                // send message
+            OpCode::SendMessage,                // send message
             OpCode::Jump(5),                       // skip child code
             // Child actor code starts here (index 4)
             OpCode::ReceiveMessage,
