@@ -99,25 +99,7 @@ stack.
 - **Opcodes**: Define the core instruction set for the VM, such as arithmetic, 
                stack manipulation, and control flow.
 
-### File Structure
-```
-raft-vm
- ├── Cargo.toml                 # Project dependencies and build settings
- ├── README.md                  # This document
- └── src
-      ├── compiler.rs           # Source to bytecode
-      ├── lib.rs                # Library
-      ├── main.rs               # CLI entry point
-      ├── runtime.rs            # bytecode interpreter
-      └── vm
-           ├── backend.rs       # Backend logic
-           ├── execution.rs     # Execution context (IP, stack, call frames)
-           ├── heap.rs          # Heap and memory management
-           ├── mod.rs           # VM module coordinator
-           ├── opcodes.rs       # Opcode definitions and execution logic
-           ├── value.rs         # Value type and arithmetic operations
-           └── vm.rs            # Core VM struct and execution loop
-```
+
 
 ### Opcodes
 Raft uses a custom bytecode instruction set that mirrors fundamental operations:
