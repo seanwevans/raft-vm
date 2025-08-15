@@ -47,7 +47,6 @@ pub enum OpCode {
     Pop,
     Dup,
     Swap,
-    Peek,
 
     // Arithmetic
     Add,
@@ -125,14 +124,6 @@ impl OpCode {
                     Ok(())
                 } else {
                     Err("Stack underflow for StoreVar".into())
-                }
-            }
-            OpCode::Peek => {
-                if let Some(v) = execution.stack.last() {
-                    execution.stack.push(*v);
-                    Ok(())
-                } else {
-                    Err("Stack underflow for Peek".into())
                 }
             }
             OpCode::LoadVar(index) => {
