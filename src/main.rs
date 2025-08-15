@@ -19,6 +19,22 @@ use raft::vm::VM;
 use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run a Raft program from a file
+    Run { filename: String },
+    /// Start the interactive Read-Eval-Print-Loop
+    Repl,
+    /// Print version information
+    Version,
+}
 
 #[tokio::main]
 async fn main() {
@@ -92,18 +108,4 @@ async fn start_repl() {
             Err(e) => eprintln!("Error: {}", e),
         }
     }
-}
-
-
-fn unknown_command(cmd: &str) -> ! {
-    eprintln!(
-        "Unknown command: {}\nUsage: raft [run <filename>|repl|--version]",
-        cmd
-    );
-    process::exit(1);
-}
-
-fn print_usage_and_exit() -> ! {
-    eprintln!("Usage: raft [run <filename>|repl|--version]");
-    process::exit(1);
 }
