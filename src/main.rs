@@ -19,7 +19,6 @@ use raft::vm::VM;
 use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
 
-
 #[tokio::main]
 async fn main() {
     // Initialize env_logger so log output respects RUST_LOG
@@ -47,7 +46,13 @@ fn print_version() {
 async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
-            let bytecode = Compiler::compile(&source).unwrap();
+            let bytecode = match Compiler::compile(&source) {
+                Ok(bytecode) => bytecode,
+                Err(e) => {
+                    eprintln!("Compilation error: {}", e);
+                    process::exit(1);
+                }
+            };
             let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
 
             // Simulate sending messages to the VM
@@ -93,7 +98,6 @@ async fn start_repl() {
         }
     }
 }
-
 
 fn unknown_command(cmd: &str) -> ! {
     eprintln!(
