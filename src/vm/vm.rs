@@ -159,7 +159,7 @@ mod tests {
         let code = vec![
             OpCode::PushConst(Value::Integer(42)), // message
             OpCode::SpawnActor(4),                 // spawn actor starting at 4
-            OpCode::SendMessage(0),                // send message
+            OpCode::SendMessage,                // send message
             OpCode::Jump(5),                       // skip child code
             // Child actor code starts here (index 4)
             OpCode::ReceiveMessage,
