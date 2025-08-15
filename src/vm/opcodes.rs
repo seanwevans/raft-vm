@@ -257,8 +257,6 @@ impl OpCode {
                 }
             }
 
-            _ => Err("Opcode not implemented".into()),
-
         }
     }
 }
