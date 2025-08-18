@@ -30,7 +30,7 @@ impl Actor {
         self.sender
             .send(msg)
             .await
-            .map_err(|e| VmError::from(e.to_string()))
+            .map_err(|e| VmError::ChannelSend(e.to_string()))
     }
 
     /// Execute the actor until its VM halts.

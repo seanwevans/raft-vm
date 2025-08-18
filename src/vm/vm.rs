@@ -49,7 +49,7 @@ impl VM {
     pub async fn run(&mut self) -> Result<(), VmError> {
         if self.execution.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
-            return Err("No bytecode to execute".into());
+            return Err(VmError::NoBytecode);
         }
 
         while self.execution.ip < self.execution.bytecode.len() {
