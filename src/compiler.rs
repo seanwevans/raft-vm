@@ -11,7 +11,14 @@ impl Compiler {
 
         let mut tokens = source.split_whitespace();
         while let Some(token) = tokens.next() {
-            if let Ok(num) = token.parse::<i32>() {
+            if token == "true" || token == "false" {
+                bytecode.push(OpCode::PushConst(Value::Boolean(token == "true")));
+            } else if token.contains('.') {
+                let num = token
+                    .parse::<f64>()
+                    .map_err(|_| format!("Invalid float: {}", token))?;
+                bytecode.push(OpCode::PushConst(Value::Float(num)));
+            } else if let Ok(num) = token.parse::<i32>() {
                 bytecode.push(OpCode::PushConst(Value::Integer(num)));
             } else {
                 match token {

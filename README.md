@@ -79,11 +79,15 @@ Example `.raft` file:
 ```
 # push 1 and 2 on the stack and add them
 1 2 +
+
+# push a boolean and a float
+true 3.14
 ```
 
-The current compiler only tokenizes whitespace separated integers and
-the `+` operator. Running the above file will leave `3` on the VM's
-stack.
+The current compiler tokenizes whitespace separated integers, floats
+(tokens containing a decimal point), booleans (`true`/`false`) and basic
+arithmetic like `+`. Running the above file will leave `3`, `true`, and
+`3.14` on the VM's stack.
 
 ---
 
