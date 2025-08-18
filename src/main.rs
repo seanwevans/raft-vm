@@ -62,13 +62,23 @@ fn print_version() {
 async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
-            let bytecode = Compiler::compile(&source).unwrap();
+            let bytecode = match Compiler::compile(&source) {
+                Ok(b) => b,
+                Err(e) => {
+                    eprintln!("Compilation error: {}", e);
+                    process::exit(1);
+                }
+            };
             let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
 
             // Simulate sending messages to the VM
             tokio::spawn(async move {
-                tx.send(Value::Integer(42)).await.unwrap();
-                tx.send(Value::Boolean(true)).await.unwrap();
+                if let Err(e) = tx.send(Value::Integer(42)).await {
+                    eprintln!("Send error: {}", e);
+                }
+                if let Err(e) = tx.send(Value::Boolean(true)).await {
+                    eprintln!("Send error: {}", e);
+                }
             });
 
             if let Err(e) = vm.run().await {
