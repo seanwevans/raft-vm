@@ -2,6 +2,26 @@ use thiserror::Error;
 
 #[derive(Debug, Error, Clone)]
 pub enum VmError {
+    Message(String),
+    TypeMismatch,
+}
+
+impl<T: Into<String>> From<T> for VmError {
+    fn from(value: T) -> Self {
+        VmError::Message(value.into())
+    }
+}
+
+impl fmt::Display for VmError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VmError::Message(msg) => write!(f, "{}", msg),
+            VmError::TypeMismatch => write!(f, "Type mismatch"),
+        }
+    }
+}
+
+impl std::error::Error for VmError {}
     #[error("Stack underflow")]
     StackUnderflow,
     #[error("Type mismatch in {0}")]
@@ -23,4 +43,3 @@ pub enum VmError {
     #[error("Compilation error: {0}")]
     CompilationError(String),
 }
-
