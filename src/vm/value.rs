@@ -17,7 +17,7 @@ impl Value {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
-            _ => Err("Type mismatch for Add".into()),
+            _ => Err(VmError::TypeMismatch("Add")),
         }
     }
 
@@ -25,7 +25,7 @@ impl Value {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
-            _ => Err("Type mismatch for Sub".into()),
+            _ => Err(VmError::TypeMismatch("Sub")),
         }
     }
 
@@ -33,7 +33,7 @@ impl Value {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
-            _ => Err("Type mismatch for Mul".into()),
+            _ => Err(VmError::TypeMismatch("Mul")),
         }
     }
 
@@ -42,7 +42,7 @@ impl Value {
             (Value::Integer(a), Value::Integer(b)) => {
                 if b == 0 {
                     log::error!("Division by zero: {}/{}", a, b);
-                    Err("Division by zero".into())
+                    Err(VmError::DivisionByZero)
                 } else {
                     Ok(Value::Integer(a / b))
                 }
@@ -50,14 +50,14 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => {
                 if b == 0.0 {
                     log::error!("Division by zero: {}/{}", a, b);
-                    Err("Division by zero".into())
+                    Err(VmError::DivisionByZero)
                 } else {
                     Ok(Value::Float(a / b))
                 }
             }
             _ => {
                 log::error!("Div type mismatch: {:?} / {:?}", self, other);
-                Err("Type mismatch for Div".into())
+                Err(VmError::TypeMismatch("Div"))
             }
         }
     }
