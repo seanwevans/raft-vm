@@ -12,7 +12,6 @@ use std::fs;
 use std::process;
 
 use raft::compiler::Compiler;
-use raft::vm::backend::Backend;
 use raft::vm::value::Value;
 use raft::vm::VM;
 
@@ -63,7 +62,7 @@ async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
             let bytecode = Compiler::compile(&source).unwrap();
-            let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+            let (mut vm, tx) = VM::new(bytecode, None);
 
             // Simulate sending messages to the VM
             tokio::spawn(async move {
