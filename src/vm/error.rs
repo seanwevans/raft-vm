@@ -1,13 +1,28 @@
 use std::fmt;
+use tokio::sync::mpsc::error::SendError;
+
+use crate::vm::value::Value;
 
 #[derive(Debug, Clone)]
 pub enum VmError {
     Message(String),
 }
 
-impl<T: Into<String>> From<T> for VmError {
-    fn from(value: T) -> Self {
-        VmError::Message(value.into())
+impl From<String> for VmError {
+    fn from(value: String) -> Self {
+        VmError::Message(value)
+    }
+}
+
+impl From<&str> for VmError {
+    fn from(value: &str) -> Self {
+        VmError::Message(value.to_string())
+    }
+}
+
+impl From<SendError<Value>> for VmError {
+    fn from(err: SendError<Value>) -> Self {
+        VmError::Message(err.to_string())
     }
 }
 

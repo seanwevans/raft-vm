@@ -202,7 +202,7 @@ impl OpCode {
                     .ok_or_else(|| VmError::from("Stack underflow for SendMessage"))?;
                 if let Value::Reference(address) = actor_ref {
                     if let Some(HeapObject::Actor(_actor_vm, sender, _)) = _heap.get(address) {
-                        sender.send(message).await.map_err(|e| e.to_string())?;
+                        sender.send(message).await.map_err(VmError::from)?;
                         execution.stack.push(Value::Reference(address));
                         Ok(())
                     } else {
