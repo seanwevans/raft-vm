@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Debug, Clone)]
 pub enum VmError {
     Message(String),
+    TypeMismatch,
 }
 
 impl<T: Into<String>> From<T> for VmError {
@@ -15,6 +16,7 @@ impl fmt::Display for VmError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VmError::Message(msg) => write!(f, "{}", msg),
+            VmError::TypeMismatch => write!(f, "Type mismatch"),
         }
     }
 }

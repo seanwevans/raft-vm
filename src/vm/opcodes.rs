@@ -154,10 +154,15 @@ impl OpCode {
                 Ok(())
             }
             OpCode::JumpIfFalse(target) => {
-                if let Some(Value::Boolean(false)) = execution.stack.pop() {
-                    execution.ip = *target;
+                match execution.stack.pop() {
+                    Some(Value::Boolean(false)) => {
+                        execution.ip = *target;
+                        Ok(())
+                    }
+                    Some(Value::Boolean(true)) => Ok(()),
+                    Some(_) => Err(VmError::TypeMismatch),
+                    None => Err("Stack underflow for JumpIfFalse".into()),
                 }
-                Ok(())
             }
             OpCode::Call(addr) => {
                 execution.call_stack.push(execution.ip);
