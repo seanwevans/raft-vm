@@ -176,4 +176,47 @@ mod tests {
             panic!("Expected HeapObject::Actor");
         }
     }
+
+    #[tokio::test]
+    async fn test_send_message_failure() {
+        use crate::vm::HeapObject;
+
+        let code = vec![
+            OpCode::PushConst(Value::Integer(1)),
+            OpCode::SpawnActor(4),
+            OpCode::SendMessage,
+            OpCode::Jump(5),
+            OpCode::ReceiveMessage,
+        ];
+
+        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+
+        // Execute PushConst and SpawnActor
+        vm.execution
+            .step(&mut vm.heap, &mut vm.mailbox)
+            .await
+            .unwrap();
+        vm.execution
+            .step(&mut vm.heap, &mut vm.mailbox)
+            .await
+            .unwrap();
+
+        // Close actor mailbox to force send failure
+        let actor_addr = match vm.execution.stack.last() {
+            Some(Value::Reference(addr)) => *addr,
+            other => panic!("Expected actor reference, got {:?}", other),
+        };
+        if let Some(HeapObject::Actor(actor_vm, _, _)) = vm.heap.get_mut(actor_addr) {
+            actor_vm.mailbox.close();
+        } else {
+            panic!("Expected HeapObject::Actor");
+        }
+
+        // SendMessage should now fail
+        let result = vm
+            .execution
+            .step(&mut vm.heap, &mut vm.mailbox)
+            .await;
+        assert!(result.is_err());
+    }
 }
