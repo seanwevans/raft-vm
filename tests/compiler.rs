@@ -31,3 +31,22 @@ fn compile_control_flow_tokens() {
     assert!(matches!(bytecode[3], OpCode::Jump(8)));
     assert!(matches!(bytecode[4], OpCode::Return));
 }
+
+#[test]
+fn compile_float_tokens() {
+    let source = "3.14 2.0 +";
+    let bytecode = Compiler::compile(source).unwrap();
+    assert_eq!(bytecode.len(), 3);
+    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.14).abs() < f64::EPSILON));
+    assert!(matches!(bytecode[1], OpCode::PushConst(Value::Float(f)) if (f - 2.0).abs() < f64::EPSILON));
+    assert!(matches!(bytecode[2], OpCode::Add));
+}
+
+#[test]
+fn compile_boolean_tokens() {
+    let source = "true false";
+    let bytecode = Compiler::compile(source).unwrap();
+    assert_eq!(bytecode.len(), 2);
+    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Boolean(true))));
+    assert!(matches!(bytecode[1], OpCode::PushConst(Value::Boolean(false))));
+}

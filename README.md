@@ -79,27 +79,35 @@ Example `.raft` file:
 ```
 # push 1 and 2 on the stack and add them
 1 2 +
+
+# push a boolean and a float
+true 3.14
 ```
 
-The current compiler only tokenizes whitespace separated integers and
-the `+` operator. Running the above file will leave `3` on the VM's
-stack.
+The current compiler tokenizes whitespace separated integers, floats
+(tokens containing a decimal point), booleans (`true`/`false`) and basic
+arithmetic like `+`. Running the above file will leave `3`, `true`, and
+`3.14` on the VM's stack.
 
 ---
 
 ## Architecture
 
 ### Components
-- **VM (Virtual Machine)**: Manages bytecode execution, stack, heap, and message 
+- **VM (Virtual Machine)**: Manages bytecode execution, stack, heap, and message
                             passing.
-- **Execution Context**: Maintains the state of the current program, including 
+- **Execution Context**: Maintains the state of the current program, including
                          the instruction pointer and call stack.
-- **Heap**: Allocates and manages dynamic memory for arrays, strings, and 
+- **Heap**: Allocates and manages dynamic memory for arrays, strings, and
             modules.
-- **Opcodes**: Define the core instruction set for the VM, such as arithmetic, 
+- **Opcodes**: Define the core instruction set for the VM, such as arithmetic,
                stack manipulation, and control flow.
-
-
+ 
+### Platform Integration
+The previous codebase included a placeholder `Backend` abstraction intended for
+platform-specific hooks. The VM no longer depends on this layer and operates
+solely through its runtime and message-passing interfaces. Future integrations
+can be added by extending opcodes or runtime components as needed.
 
 ### Opcodes
 Raft uses a custom bytecode instruction set that mirrors fundamental operations:

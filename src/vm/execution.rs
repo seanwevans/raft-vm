@@ -36,7 +36,7 @@ impl ExecutionContext {
     ) -> Result<(), VmError> {
         if self.ip >= self.bytecode.len() {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
-            return Err("Execution out of bounds".into());
+            return Err(VmError::ExecutionOutOfBounds);
         }
 
         let opcode = self.bytecode[self.ip].clone();

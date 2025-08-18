@@ -12,7 +12,6 @@ use std::fs;
 use std::process;
 
 use raft::compiler::Compiler;
-use raft::vm::backend::Backend;
 use raft::vm::value::Value;
 use raft::vm::VM;
 
@@ -62,6 +61,7 @@ fn print_version() {
 async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
+
             let bytecode = match Compiler::compile(&source) {
                 Ok(b) => b,
                 Err(e) => {

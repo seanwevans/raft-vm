@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::value::Value;
-use crate::vm::{backend::Backend, vm::VM};
+use crate::vm::vm::VM;
 use tokio::sync::mpsc::Receiver;
 
 fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
@@ -17,7 +17,7 @@ where
         Ok(())
     } else {
         log::error!("Stack underflow during unary operation");
-        Err("Stack underflow for unary operation".into())
+        Err(VmError::StackUnderflow)
     }
 }
 
@@ -27,7 +27,7 @@ where
 {
     if stack.len() < 2 {
         log::error!("Stack underflow during binary operation");
-        return Err("Stack underflow for binary operation".into());
+        return Err(VmError::StackUnderflow);
     }
     let b = stack.pop().unwrap();
     let a = stack.pop().unwrap();
@@ -89,7 +89,7 @@ impl OpCode {
             OpCode::Neg => unary_op(&mut execution.stack, |a| match a {
                 Value::Integer(i) => Ok(Value::Integer(-i)),
                 Value::Float(f) => Ok(Value::Float(-f)),
-                _ => Err("Cannot negate non-numeric value".into()),
+                _ => Err(VmError::TypeMismatch("Neg")),
             }),
             OpCode::PushConst(v) => {
                 execution.stack.push(*v);
@@ -99,7 +99,7 @@ impl OpCode {
                 execution
                     .stack
                     .pop()
-                    .ok_or_else(|| VmError::from("Stack underflow"))?;
+                    .ok_or(VmError::StackUnderflow)?;
                 Ok(())
             }
             OpCode::Dup => {
@@ -107,12 +107,12 @@ impl OpCode {
                     execution.stack.push(v);
                     Ok(())
                 } else {
-                    Err("Stack underflow".into())
+                    Err(VmError::StackUnderflow)
                 }
             }
             OpCode::Swap => {
                 if execution.stack.len() < 2 {
-                    return Err("Stack underflow for Swap".into());
+                    return Err(VmError::StackUnderflow);
                 }
                 let len = execution.stack.len();
                 execution.stack.swap(len - 1, len - 2);
@@ -123,7 +123,7 @@ impl OpCode {
                     execution.locals.insert(*index, value);
                     Ok(())
                 } else {
-                    Err("Stack underflow for StoreVar".into())
+                    Err(VmError::StackUnderflow)
                 }
             }
             OpCode::LoadVar(index) => {
@@ -131,33 +131,38 @@ impl OpCode {
                     execution.stack.push(*value);
                     Ok(())
                 } else {
-                    Err(format!("Variable at index {} not found", index).into())
+                    Err(VmError::VariableNotFound(*index))
                 }
             }
             OpCode::Mod => binary_op(&mut execution.stack, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
                     if y == 0 {
-                        Err("Modulo by zero".into())
+                        Err(VmError::DivisionByZero)
                     } else {
                         Ok(Value::Integer(x % y))
                     }
                 }
-                _ => Err("Type mismatch for Mod".into()),
+                _ => Err(VmError::TypeMismatch("Mod")),
             }),
             OpCode::Exp => binary_op(&mut execution.stack, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => Ok(Value::Integer(x.pow(y as u32))),
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.powf(y))),
-                _ => Err("Type mismatch for Exp".into()),
+                _ => Err(VmError::TypeMismatch("Exp")),
             }),
             OpCode::Jump(target) => {
                 execution.ip = *target;
                 Ok(())
             }
             OpCode::JumpIfFalse(target) => {
-                if let Some(Value::Boolean(false)) = execution.stack.pop() {
-                    execution.ip = *target;
+                match execution.stack.pop() {
+                    Some(Value::Boolean(false)) => {
+                        execution.ip = *target;
+                        Ok(())
+                    }
+                    Some(Value::Boolean(true)) => Ok(()),
+                    Some(_) => Err(VmError::TypeMismatch),
+                    None => Err("Stack underflow for JumpIfFalse".into()),
                 }
-                Ok(())
             }
             OpCode::Call(addr) => {
                 execution.call_stack.push(execution.ip);
@@ -169,7 +174,7 @@ impl OpCode {
                     execution.ip = return_addr;
                     Ok(())
                 } else {
-                    Err("Call stack underflow on Return".into())
+                    Err(VmError::StackUnderflow)
                 }
             }
             OpCode::ReceiveMessage => {
@@ -179,13 +184,13 @@ impl OpCode {
                     Ok(())
                 } else {
                     log::warn!("Mailbox is empty or closed");
-                    Err("Mailbox empty".into())
+                    Err(VmError::MailboxEmpty)
                 }
             }
 
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+                let (mut vm, tx) = VM::new(bytecode, None);
                 vm.set_ip(*addr);
                 let address = _heap.allocate(HeapObject::Actor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
@@ -195,27 +200,30 @@ impl OpCode {
                 let actor_ref = execution
                     .stack
                     .pop()
-                    .ok_or_else(|| VmError::from("Stack underflow for SendMessage"))?;
+                    .ok_or(VmError::StackUnderflow)?;
                 let message = execution
                     .stack
                     .pop()
-                    .ok_or_else(|| VmError::from("Stack underflow for SendMessage"))?;
+                    .ok_or(VmError::StackUnderflow)?;
                 if let Value::Reference(address) = actor_ref {
                     if let Some(HeapObject::Actor(_actor_vm, sender, _)) = _heap.get(address) {
-                        sender.send(message).await.map_err(|e| e.to_string())?;
+                        sender
+                            .send(message)
+                            .await
+                            .map_err(|e| VmError::ChannelSend(e.to_string()))?;
                         execution.stack.push(Value::Reference(address));
                         Ok(())
                     } else {
-                        Err("Invalid actor reference".to_string().into())
+                        Err(VmError::InvalidReference)
                     }
                 } else {
-                    Err("Invalid actor reference".to_string().into())
+                    Err(VmError::InvalidReference)
 
                 }
             }
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+                let (mut vm, tx) = VM::new(bytecode, None);
                 vm.set_ip(*addr);
                 let address = _heap.allocate(HeapObject::Supervisor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
@@ -225,17 +233,17 @@ impl OpCode {
                 let sup_ref = execution
                     .stack
                     .pop()
-                    .ok_or_else(|| VmError::from("Stack underflow for SetStrategy"))?;
+                    .ok_or(VmError::StackUnderflow)?;
                 if let Value::Reference(addr) = sup_ref {
                     if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.set_strategy(*strategy);
                         execution.stack.push(Value::Reference(addr));
                         Ok(())
                     } else {
-                        Err("Invalid supervisor reference".to_string().into())
+                        Err(VmError::InvalidReference)
                     }
                 } else {
-                    Err("Invalid supervisor reference".to_string().into())
+                    Err(VmError::InvalidReference)
 
                 }
             }
@@ -243,17 +251,17 @@ impl OpCode {
                 let sup_ref = execution
                     .stack
                     .pop()
-                    .ok_or_else(|| VmError::from("Stack underflow for RestartChild"))?;
+                    .ok_or(VmError::StackUnderflow)?;
                 if let Value::Reference(addr) = sup_ref {
                     if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.restart_child(*child);
                         execution.stack.push(Value::Reference(addr));
                         Ok(())
                     } else {
-                        Err("Invalid supervisor reference".to_string().into())
+                        Err(VmError::InvalidReference)
                     }
                 } else {
-                    Err("Invalid supervisor reference".to_string().into())
+                    Err(VmError::InvalidReference)
                 }
             }
 
