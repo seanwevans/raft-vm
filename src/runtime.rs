@@ -4,7 +4,7 @@ use tokio::sync::mpsc::Sender;
 
 use crate::vm::error::VmError;
 use crate::vm::value::Value;
-use crate::vm::{Backend, OpCode, VM};
+use crate::vm::{OpCode, VM};
 
 /// A lightweight wrapper around a `VM` that exposes a mailbox
 /// for message passing.
@@ -15,8 +15,8 @@ pub struct Actor {
 
 impl Actor {
     /// Create a new actor from bytecode.
-    pub fn new(bytecode: Vec<OpCode>, backend: Backend) -> Self {
-        let (vm, tx) = VM::new(bytecode, None, backend);
+    pub fn new(bytecode: Vec<OpCode>) -> Self {
+        let (vm, tx) = VM::new(bytecode, None);
         Actor { vm, sender: tx }
     }
 

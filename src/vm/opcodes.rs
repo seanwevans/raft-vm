@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::value::Value;
-use crate::vm::{backend::Backend, vm::VM};
+use crate::vm::vm::VM;
 use tokio::sync::mpsc::Receiver;
 
 fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
@@ -185,7 +185,7 @@ impl OpCode {
 
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+                let (mut vm, tx) = VM::new(bytecode, None);
                 vm.set_ip(*addr);
                 let address = _heap.allocate(HeapObject::Actor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));
@@ -218,7 +218,7 @@ impl OpCode {
             }
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+                let (mut vm, tx) = VM::new(bytecode, None);
                 vm.set_ip(*addr);
                 let address = _heap.allocate(HeapObject::Supervisor(vm, tx, 1));
                 execution.stack.push(Value::Reference(address));

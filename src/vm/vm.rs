@@ -1,6 +1,5 @@
 // src/vm/vm.rs
 
-use crate::vm::backend::Backend;
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::Heap;
@@ -15,14 +14,12 @@ pub struct VM {
     heap: Heap,
     pub mailbox: Receiver<Value>,
     _supervisor: Option<Sender<usize>>,
-    _backend: Backend,
 }
 
 impl VM {
     pub fn new(
         bytecode: Vec<OpCode>,
         supervisor: Option<Sender<usize>>,
-        backend: Backend,
     ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
@@ -32,7 +29,6 @@ impl VM {
                 heap: Heap::new(),
                 mailbox: rx,
                 _supervisor: supervisor,
-                _backend: backend,
             },
             tx,
         )
@@ -79,7 +75,6 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vm::backend::Backend;
     use crate::vm::value::Value;
 
     #[tokio::test]
@@ -90,7 +85,7 @@ mod tests {
             OpCode::Add,
         ];
 
-        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+        let (mut vm, _tx) = VM::new(code, None);
         vm.run().await.unwrap();
 
         match vm.execution.stack.pop() {
@@ -163,7 +158,7 @@ mod tests {
             OpCode::ReceiveMessage,
         ];
 
-        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+        let (mut vm, _tx) = VM::new(code, None);
         vm.run().await.unwrap();
 
         // Actor reference should remain on stack after sending
