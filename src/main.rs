@@ -19,7 +19,6 @@ use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[derive(Parser)]
-
 #[command(name = "raft",author, version, about, long_about = None)]
 
 struct Cli {
@@ -61,7 +60,6 @@ fn print_version() {
 async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
-
             let bytecode = match Compiler::compile(&source) {
                 Ok(b) => b,
                 Err(e) => {
@@ -69,7 +67,7 @@ async fn handle_run(filename: &str) {
                     process::exit(1);
                 }
             };
-            let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+            let (mut vm, tx) = VM::new(bytecode, None);
 
             // Simulate sending messages to the VM
             tokio::spawn(async move {
