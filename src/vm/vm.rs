@@ -189,7 +189,7 @@ mod tests {
             OpCode::ReceiveMessage,
         ];
 
-        let (mut vm, _tx) = VM::new(code, None, Backend::default());
+        let (mut vm, _tx) = VM::new(code, None);
 
         // Execute PushConst and SpawnActor
         vm.execution

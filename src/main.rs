@@ -69,7 +69,7 @@ async fn handle_run(filename: &str) {
                     process::exit(1);
                 }
             };
-            let (mut vm, tx) = VM::new(bytecode, None, Backend::default());
+            let (mut vm, tx) = VM::new(bytecode, None);
 
             // Simulate sending messages to the VM
             tokio::spawn(async move {
