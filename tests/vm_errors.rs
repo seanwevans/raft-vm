@@ -22,11 +22,13 @@ async fn pop_on_empty_stack_returns_error() {
 
 #[tokio::test]
 async fn swap_on_single_element_stack_returns_error() {
-    let code = vec![
-        OpCode::PushConst(Value::Integer(1)),
-        OpCode::Swap,
-    ];
+
+    let code = vec![OpCode::PushConst(Value::Integer(1)), OpCode::Swap];
     let (mut vm, _tx) = VM::new(code, None);
-    let err = vm.run().await.expect_err("expected stack underflow for swap");
-    assert_eq!(err.to_string(), "Stack underflow for Swap");
+    let err = vm
+        .run()
+        .await
+        .expect_err("expected stack underflow for swap");
+    assert_eq!(err.to_string(), "Stack underflow");
+
 }

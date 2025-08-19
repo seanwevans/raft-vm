@@ -14,5 +14,18 @@ async fn jump_if_false_errors_on_non_boolean() {
     let result = OpCode::JumpIfFalse(0)
         .execute(&mut ctx, &mut heap, &mut rx)
         .await;
-    assert!(matches!(result, Err(VmError::TypeMismatch(_))));
+
+    assert!(matches!(result, Err(VmError::TypeMismatch("JumpIfFalse"))));
+}
+
+#[tokio::test]
+async fn jump_if_false_errors_on_empty_stack() {
+    let mut ctx = ExecutionContext::new(vec![]);
+    let mut heap = Heap::new();
+    let (_tx, mut rx) = channel(1);
+    let result = OpCode::JumpIfFalse(0)
+        .execute(&mut ctx, &mut heap, &mut rx)
+        .await;
+    assert!(matches!(result, Err(VmError::StackUnderflow)));
+
 }

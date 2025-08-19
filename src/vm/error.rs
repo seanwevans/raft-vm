@@ -5,6 +5,8 @@ use crate::vm::value::Value;
 
 #[derive(Error, Debug, Clone)]
 pub enum VmError {
+    #[error("{0}")]
+    Message(String),
     #[error("Stack underflow")]
     StackUnderflow,
     #[error("Type mismatch in {0}")]
@@ -29,13 +31,13 @@ pub enum VmError {
 
 impl From<String> for VmError {
     fn from(value: String) -> Self {
-        VmError::CompilationError(value)
+        VmError::Message(value)
     }
 }
 
 impl From<&str> for VmError {
     fn from(value: &str) -> Self {
-        VmError::CompilationError(value.to_string())
+        VmError::Message(value.to_string())
     }
 }
 
