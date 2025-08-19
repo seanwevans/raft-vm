@@ -112,7 +112,7 @@ impl OpCode {
             }
             OpCode::Swap => {
                 if execution.stack.len() < 2 {
-                    return Err(VmError::StackUnderflow);
+                    return Err(VmError::StackUnderflowFor("Swap"));
                 }
                 let len = execution.stack.len();
                 execution.stack.swap(len - 1, len - 2);
@@ -160,8 +160,8 @@ impl OpCode {
                         Ok(())
                     }
                     Some(Value::Boolean(true)) => Ok(()),
-                    Some(_) => Err(VmError::TypeMismatch),
-                    None => Err("Stack underflow for JumpIfFalse".into()),
+                    Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
+                    None => Err(VmError::StackUnderflowFor("JumpIfFalse")),
                 }
             }
             OpCode::Call(addr) => {

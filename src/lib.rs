@@ -4,7 +4,7 @@ pub mod compiler;
 pub mod runtime;
 pub mod vm;
 
-pub use compiler::Compiler;
+pub use compiler::{Compiler, CompilerError};
 pub use runtime::Actor;
 pub use vm::VM;
 
@@ -14,7 +14,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Runs a Raft program from source code
 pub async fn run(source: &str) -> Result<(), VmError> {
-    let bytecode = Compiler::compile(source).map_err(VmError::CompilationError)?;
+    let bytecode = Compiler::compile(source)?;
 
     let (mut vm, _tx) = VM::new(bytecode, None);
     vm.run().await

@@ -1,6 +1,8 @@
-use raft::compiler::Compiler;
+use raft::compiler::{Compiler, CompilerError};
 use raft::vm::opcodes::OpCode;
 use raft::vm::value::Value;
+use raft::vm::VmError;
+use raft::run;
 
 #[test]
 fn compile_arithmetic_tokens() {
@@ -49,4 +51,28 @@ fn compile_boolean_tokens() {
     assert_eq!(bytecode.len(), 2);
     assert!(matches!(bytecode[0], OpCode::PushConst(Value::Boolean(true))));
     assert!(matches!(bytecode[1], OpCode::PushConst(Value::Boolean(false))));
+}
+
+#[test]
+fn invalid_token_returns_error() {
+    let err = Compiler::compile("1 foo").unwrap_err();
+    assert!(matches!(err, CompilerError::InvalidToken(t) if t == "foo"));
+}
+
+#[test]
+fn invalid_address_returns_error() {
+    let err = Compiler::compile("Jump abc").unwrap_err();
+    assert!(matches!(err, CompilerError::InvalidAddress(a) if a == "abc"));
+}
+
+#[test]
+fn parse_error_returns_error() {
+    let err = Compiler::compile("1.." ).unwrap_err();
+    assert!(matches!(err, CompilerError::ParseError(m) if m.contains("1..")));
+}
+
+#[tokio::test]
+async fn run_propagates_compiler_error() {
+    let err = run("bogus").await.expect_err("expected compile error");
+    assert!(matches!(err, VmError::CompilationError(CompilerError::InvalidToken(_))));
 }
