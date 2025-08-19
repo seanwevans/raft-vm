@@ -3,7 +3,7 @@ use tokio::sync::mpsc::error::SendError;
 
 use crate::vm::value::Value;
 
-#[derive(Debug, Error, Clone)]
+#[derive(Error, Debug, Clone)]
 pub enum VmError {
     #[error("{0}")]
     Message(String),

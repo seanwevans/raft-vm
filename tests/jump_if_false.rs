@@ -14,6 +14,7 @@ async fn jump_if_false_errors_on_non_boolean() {
     let result = OpCode::JumpIfFalse(0)
         .execute(&mut ctx, &mut heap, &mut rx)
         .await;
+
     assert!(matches!(result, Err(VmError::TypeMismatch("JumpIfFalse"))));
 }
 
@@ -26,4 +27,5 @@ async fn jump_if_false_errors_on_empty_stack() {
         .execute(&mut ctx, &mut heap, &mut rx)
         .await;
     assert!(matches!(result, Err(VmError::StackUnderflow)));
+
 }

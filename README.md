@@ -104,10 +104,9 @@ arithmetic like `+`. Running the above file will leave `3`, `true`, and
                stack manipulation, and control flow.
  
 ### Platform Integration
-The previous codebase included a placeholder `Backend` abstraction intended for
-platform-specific hooks. The VM no longer depends on this layer and operates
-solely through its runtime and message-passing interfaces. Future integrations
-can be added by extending opcodes or runtime components as needed.
+The VM operates solely through its runtime and message-passing interfaces.
+Platform-specific hooks can be added by extending opcodes or runtime components
+as needed.
 
 ### Opcodes
 Raft uses a custom bytecode instruction set that mirrors fundamental operations:
