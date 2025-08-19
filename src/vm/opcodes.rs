@@ -109,7 +109,7 @@ impl OpCode {
             }
             OpCode::Swap => {
                 if execution.stack.len() < 2 {
-                    return Err(VmError::StackUnderflow);
+                    return Err(VmError::StackUnderflowFor("Swap"));
                 }
                 let len = execution.stack.len();
                 execution.stack.swap(len - 1, len - 2);
@@ -150,10 +150,17 @@ impl OpCode {
                 execution.ip = *target;
                 Ok(())
             }
-            OpCode::JumpIfFalse(target) => match execution.stack.pop() {
-                Some(Value::Boolean(false)) => {
-                    execution.ip = *target;
-                    Ok(())
+
+            OpCode::JumpIfFalse(target) => {
+                match execution.stack.pop() {
+                    Some(Value::Boolean(false)) => {
+                        execution.ip = *target;
+                        Ok(())
+                    }
+                    Some(Value::Boolean(true)) => Ok(()),
+                    Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
+                    None => Err(VmError::StackUnderflowFor("JumpIfFalse")),
+
                 }
                 Some(Value::Boolean(true)) => Ok(()),
                 Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),

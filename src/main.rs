@@ -13,7 +13,7 @@ use std::process;
 
 use raft::compiler::Compiler;
 use raft::vm::value::Value;
-use raft::vm::VM;
+use raft::vm::{VmError, VM};
 
 use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
@@ -63,7 +63,8 @@ async fn handle_run(filename: &str) {
             let bytecode = match Compiler::compile(&source) {
                 Ok(b) => b,
                 Err(e) => {
-                    eprintln!("Compilation error: {}", e);
+                    let err: VmError = e.into();
+                    eprintln!("{}", err);
                     process::exit(1);
                 }
             };

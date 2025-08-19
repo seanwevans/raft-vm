@@ -2,11 +2,22 @@
 
 use crate::vm::opcodes::OpCode;
 use crate::vm::value::Value;
+use thiserror::Error;
+
+#[derive(Debug, Error, Clone)]
+pub enum CompilerError {
+    #[error("Invalid token: {0}")]
+    InvalidToken(String),
+    #[error("Invalid address: {0}")]
+    InvalidAddress(String),
+    #[error("Parse error: {0}")]
+    ParseError(String),
+}
 
 pub struct Compiler;
 
 impl Compiler {
-    pub fn compile(source: &str) -> Result<Vec<OpCode>, String> {
+    pub fn compile(source: &str) -> Result<Vec<OpCode>, CompilerError> {
         let mut bytecode = Vec::new();
 
         let mut tokens = source.split_whitespace();
@@ -16,7 +27,7 @@ impl Compiler {
             } else if token.contains('.') {
                 let num = token
                     .parse::<f64>()
-                    .map_err(|_| format!("Invalid float: {}", token))?;
+                    .map_err(|_| CompilerError::ParseError(format!("Invalid float: {}", token)))?;
                 bytecode.push(OpCode::PushConst(Value::Float(num)));
             } else if let Ok(num) = token.parse::<i32>() {
                 bytecode.push(OpCode::PushConst(Value::Integer(num)));
@@ -30,29 +41,34 @@ impl Compiler {
                     "Neg" => bytecode.push(OpCode::Neg),
                     "Exp" | "^" => bytecode.push(OpCode::Exp),
                     "Jump" => {
-                        let addr_token = tokens.next().ok_or("Expected address after Jump")?;
+                        let addr_token = tokens
+                            .next()
+                            .ok_or_else(|| CompilerError::InvalidAddress("expected address after Jump".into()))?;
                         let addr = addr_token
                             .parse::<usize>()
-                            .map_err(|_| format!("Invalid address: {}", addr_token))?;
+                            .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::Jump(addr));
                     }
                     "JumpIfFalse" => {
-                        let addr_token =
-                            tokens.next().ok_or("Expected address after JumpIfFalse")?;
+                        let addr_token = tokens
+                            .next()
+                            .ok_or_else(|| CompilerError::InvalidAddress("expected address after JumpIfFalse".into()))?;
                         let addr = addr_token
                             .parse::<usize>()
-                            .map_err(|_| format!("Invalid address: {}", addr_token))?;
+                            .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::JumpIfFalse(addr));
                     }
                     "Call" => {
-                        let addr_token = tokens.next().ok_or("Expected address after Call")?;
+                        let addr_token = tokens
+                            .next()
+                            .ok_or_else(|| CompilerError::InvalidAddress("expected address after Call".into()))?;
                         let addr = addr_token
                             .parse::<usize>()
-                            .map_err(|_| format!("Invalid address: {}", addr_token))?;
+                            .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::Call(addr));
                     }
                     "Return" => bytecode.push(OpCode::Return),
-                    _ => return Err(format!("Unknown token: {}", token)),
+                    _ => return Err(CompilerError::InvalidToken(token.to_string())),
                 }
             }
         }

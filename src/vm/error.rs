@@ -1,6 +1,7 @@
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
+use crate::compiler::CompilerError;
 use crate::vm::value::Value;
 
 #[derive(Error, Debug, Clone)]
@@ -9,6 +10,8 @@ pub enum VmError {
     Message(String),
     #[error("Stack underflow")]
     StackUnderflow,
+    #[error("Stack underflow for {0}")]
+    StackUnderflowFor(&'static str),
     #[error("Type mismatch in {0}")]
     TypeMismatch(&'static str),
     #[error("Division by zero")]
@@ -26,7 +29,13 @@ pub enum VmError {
     #[error("Channel send error: {0}")]
     ChannelSend(String),
     #[error("Compilation error: {0}")]
-    CompilationError(String),
+    CompilationError(#[from] CompilerError),
+}
+
+impl From<SendError<Value>> for VmError {
+    fn from(err: SendError<Value>) -> Self {
+        VmError::ChannelSend(err.to_string())
+    }
 }
 
 impl From<String> for VmError {
