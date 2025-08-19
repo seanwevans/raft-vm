@@ -19,7 +19,6 @@ use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[derive(Parser)]
-
 #[command(name = "raft",author, version, about, long_about = None)]
 
 struct Cli {
@@ -61,7 +60,6 @@ fn print_version() {
 async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
-
             let bytecode = match Compiler::compile(&source) {
                 Ok(b) => b,
                 Err(e) => {

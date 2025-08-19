@@ -4,7 +4,7 @@ use tokio::sync::mpsc::error::SendError;
 use crate::compiler::CompilerError;
 use crate::vm::value::Value;
 
-#[derive(Debug, Error, Clone)]
+#[derive(Error, Debug, Clone)]
 pub enum VmError {
     #[error("{0}")]
     Message(String),
@@ -30,6 +30,24 @@ pub enum VmError {
     ChannelSend(String),
     #[error("Compilation error: {0}")]
     CompilationError(#[from] CompilerError),
+}
+
+impl From<SendError<Value>> for VmError {
+    fn from(err: SendError<Value>) -> Self {
+        VmError::ChannelSend(err.to_string())
+    }
+}
+
+impl From<String> for VmError {
+    fn from(value: String) -> Self {
+        VmError::Message(value)
+    }
+}
+
+impl From<&str> for VmError {
+    fn from(value: &str) -> Self {
+        VmError::Message(value.to_string())
+    }
 }
 
 impl From<SendError<Value>> for VmError {

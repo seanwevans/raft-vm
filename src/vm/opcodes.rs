@@ -96,10 +96,7 @@ impl OpCode {
                 Ok(())
             }
             OpCode::Pop => {
-                execution
-                    .stack
-                    .pop()
-                    .ok_or(VmError::StackUnderflow)?;
+                execution.stack.pop().ok_or(VmError::StackUnderflow)?;
                 Ok(())
             }
             OpCode::Dup => {
@@ -153,6 +150,7 @@ impl OpCode {
                 execution.ip = *target;
                 Ok(())
             }
+
             OpCode::JumpIfFalse(target) => {
                 match execution.stack.pop() {
                     Some(Value::Boolean(false)) => {
@@ -162,8 +160,12 @@ impl OpCode {
                     Some(Value::Boolean(true)) => Ok(()),
                     Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
                     None => Err(VmError::StackUnderflowFor("JumpIfFalse")),
+
                 }
-            }
+                Some(Value::Boolean(true)) => Ok(()),
+                Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
+                None => Err(VmError::StackUnderflow),
+            },
             OpCode::Call(addr) => {
                 execution.call_stack.push(execution.ip);
                 execution.ip = *addr;
@@ -197,14 +199,8 @@ impl OpCode {
                 Ok(())
             }
             OpCode::SendMessage => {
-                let actor_ref = execution
-                    .stack
-                    .pop()
-                    .ok_or(VmError::StackUnderflow)?;
-                let message = execution
-                    .stack
-                    .pop()
-                    .ok_or(VmError::StackUnderflow)?;
+                let actor_ref = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let message = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
                 if let Value::Reference(address) = actor_ref {
                     if let Some(HeapObject::Actor(_actor_vm, sender, _)) = _heap.get(address) {
                         sender.send(message).await.map_err(VmError::from)?;
@@ -215,7 +211,6 @@ impl OpCode {
                     }
                 } else {
                     Err(VmError::InvalidReference)
-
                 }
             }
             OpCode::SpawnSupervisor(addr) => {
@@ -227,10 +222,7 @@ impl OpCode {
                 Ok(())
             }
             OpCode::SetStrategy(strategy) => {
-                let sup_ref = execution
-                    .stack
-                    .pop()
-                    .ok_or(VmError::StackUnderflow)?;
+                let sup_ref = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
                 if let Value::Reference(addr) = sup_ref {
                     if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.set_strategy(*strategy);
@@ -241,14 +233,10 @@ impl OpCode {
                     }
                 } else {
                     Err(VmError::InvalidReference)
-
                 }
             }
             OpCode::RestartChild(child) => {
-                let sup_ref = execution
-                    .stack
-                    .pop()
-                    .ok_or(VmError::StackUnderflow)?;
+                let sup_ref = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
                 if let Value::Reference(addr) = sup_ref {
                     if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
                         vm.restart_child(*child);
@@ -261,7 +249,6 @@ impl OpCode {
                     Err(VmError::InvalidReference)
                 }
             }
-
         }
     }
 }

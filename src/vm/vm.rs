@@ -17,10 +17,7 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(
-        bytecode: Vec<OpCode>,
-        supervisor: Option<Sender<usize>>,
-    ) -> (Self, Sender<Value>) {
+    pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
         (
@@ -152,7 +149,7 @@ mod tests {
         let code = vec![
             OpCode::PushConst(Value::Integer(42)), // message
             OpCode::SpawnActor(4),                 // spawn actor starting at 4
-            OpCode::SendMessage,                // send message
+            OpCode::SendMessage,                   // send message
             OpCode::Jump(5),                       // skip child code
             // Child actor code starts here (index 4)
             OpCode::ReceiveMessage,
@@ -213,10 +210,7 @@ mod tests {
         }
 
         // SendMessage should now fail
-        let result = vm
-            .execution
-            .step(&mut vm.heap, &mut vm.mailbox)
-            .await;
+        let result = vm.execution.step(&mut vm.heap, &mut vm.mailbox).await;
         assert!(result.is_err());
     }
 }
