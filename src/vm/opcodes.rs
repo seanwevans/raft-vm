@@ -142,7 +142,13 @@ impl OpCode {
                 _ => Err(VmError::TypeMismatch("Mod")),
             }),
             OpCode::Exp => binary_op(&mut execution.stack, |a, b| match (a, b) {
-                (Value::Integer(x), Value::Integer(y)) => Ok(Value::Integer(x.pow(y as u32))),
+                (Value::Integer(x), Value::Integer(y)) => {
+                    if y < 0 {
+                        Ok(Value::Float((x as f64).powi(y)))
+                    } else {
+                        Ok(Value::Integer(x.pow(y as u32)))
+                    }
+                }
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.powf(y))),
                 _ => Err(VmError::TypeMismatch("Exp")),
             }),
@@ -151,16 +157,10 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::JumpIfFalse(target) => {
-                match execution.stack.pop() {
-                    Some(Value::Boolean(false)) => {
-                        execution.ip = *target;
-                        Ok(())
-                    }
-                    Some(Value::Boolean(true)) => Ok(()),
-                    Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
-                    None => Err(VmError::StackUnderflowFor("JumpIfFalse")),
-
+            OpCode::JumpIfFalse(target) => match execution.stack.pop() {
+                Some(Value::Boolean(false)) => {
+                    execution.ip = *target;
+                    Ok(())
                 }
                 Some(Value::Boolean(true)) => Ok(()),
                 Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
