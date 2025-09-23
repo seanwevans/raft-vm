@@ -92,6 +92,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_negative_integer_exponent_produces_float_result() {
+        let code = vec![
+            OpCode::PushConst(Value::Integer(2)),
+            OpCode::PushConst(Value::Integer(-3)),
+            OpCode::Exp,
+        ];
+
+        let (mut vm, _tx) = VM::new(code, None);
+        vm.run().await.unwrap();
+
+        match vm.execution.stack.pop() {
+            Some(Value::Float(result)) => {
+                assert!((result - 0.125).abs() < f64::EPSILON);
+            }
+            other => panic!("Expected Some(Float(_)), got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
     async fn test_sequential_ip_increment() {
         let code = vec![
             OpCode::PushConst(Value::Integer(1)),

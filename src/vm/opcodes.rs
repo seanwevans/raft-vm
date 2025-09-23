@@ -185,7 +185,13 @@ impl OpCode {
                 _ => Err(VmError::TypeMismatch("Mod")),
             }),
             OpCode::Exp => binary_op(&mut execution.stack, |a, b| match (a, b) {
-                (Value::Integer(x), Value::Integer(y)) => Ok(Value::Integer(x.pow(y as u32))),
+                (Value::Integer(x), Value::Integer(y)) => {
+                    if y < 0 {
+                        Ok(Value::Float((x as f64).powi(y)))
+                    } else {
+                        Ok(Value::Integer(x.pow(y as u32)))
+                    }
+                }
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.powf(y))),
                 _ => Err(VmError::TypeMismatch("Exp")),
             }),
