@@ -63,7 +63,12 @@ impl Heap {
     }
 
     pub fn collect_garbage(&mut self) {
+        let before = self.objects.len();
         self.objects.retain(|_, obj| obj.is_alive());
+        let collected = before - self.objects.len();
+        if collected > 0 {
+            log::info!("Collected {} unreachable heap objects", collected);
+        }
     }
 }
 

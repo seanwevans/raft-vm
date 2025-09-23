@@ -36,6 +36,47 @@ where
     Ok(())
 }
 
+fn increment_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
+    if let Some(object) = heap.get_mut(address) {
+        object.increment_ref();
+        Ok(())
+    } else {
+        Err(VmError::InvalidReference)
+    }
+}
+
+fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
+    if let Some(object) = heap.get_mut(address) {
+        object.decrement_ref();
+        Ok(())
+    } else {
+        Err(VmError::InvalidReference)
+    }
+}
+
+fn push_value(
+    execution: &mut ExecutionContext,
+    heap: &mut Heap,
+    value: Value,
+) -> Result<(), VmError> {
+    if let Value::Reference(address) = value {
+        increment_reference(heap, address)?;
+    }
+    execution.stack.push(value);
+    Ok(())
+}
+
+fn pop_value(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<Value, VmError> {
+    if let Some(value) = execution.stack.pop() {
+        if let Value::Reference(address) = value {
+            decrement_reference(heap, address)?;
+        }
+        Ok(value)
+    } else {
+        Err(VmError::StackUnderflow)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum OpCode {
     // Variables
@@ -78,7 +119,7 @@ impl OpCode {
     pub async fn execute(
         &self,
         execution: &mut ExecutionContext,
-        _heap: &mut Heap,
+        heap: &mut Heap,
         mailbox: &mut Receiver<Value>,
     ) -> Result<(), VmError> {
         match self {
@@ -91,18 +132,14 @@ impl OpCode {
                 Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(VmError::TypeMismatch("Neg")),
             }),
-            OpCode::PushConst(v) => {
-                execution.stack.push(*v);
-                Ok(())
-            }
+            OpCode::PushConst(v) => push_value(execution, heap, *v),
             OpCode::Pop => {
-                execution.stack.pop().ok_or(VmError::StackUnderflow)?;
+                pop_value(execution, heap)?;
                 Ok(())
             }
             OpCode::Dup => {
-                if let Some(&v) = execution.stack.last() {
-                    execution.stack.push(v);
-                    Ok(())
+                if let Some(&value) = execution.stack.last() {
+                    push_value(execution, heap, value)
                 } else {
                     Err(VmError::StackUnderflow)
                 }
@@ -116,17 +153,23 @@ impl OpCode {
                 Ok(())
             }
             OpCode::StoreVar(index) => {
-                if let Some(value) = execution.stack.pop() {
-                    execution.locals.insert(*index, value);
-                    Ok(())
-                } else {
-                    Err(VmError::StackUnderflow)
+                let value = pop_value(execution, heap)?;
+
+                if let Some(existing) = execution.locals.insert(*index, value) {
+                    if let Value::Reference(address) = existing {
+                        decrement_reference(heap, address)?;
+                    }
                 }
+
+                if let Value::Reference(address) = value {
+                    increment_reference(heap, address)?;
+                }
+
+                Ok(())
             }
             OpCode::LoadVar(index) => {
                 if let Some(value) = execution.locals.get(index) {
-                    execution.stack.push(*value);
-                    Ok(())
+                    push_value(execution, heap, *value)
                 } else {
                     Err(VmError::VariableNotFound(*index))
                 }
@@ -151,14 +194,15 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::JumpIfFalse(target) => match execution.stack.pop() {
-                Some(Value::Boolean(false)) => {
+            OpCode::JumpIfFalse(target) => match pop_value(execution, heap) {
+                Ok(Value::Boolean(false)) => {
                     execution.ip = *target;
                     Ok(())
                 }
-                Some(Value::Boolean(true)) => Ok(()),
-                Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
-                None => Err(VmError::StackUnderflowFor("JumpIfFalse")),
+                Ok(Value::Boolean(true)) => Ok(()),
+                Ok(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
+                Err(VmError::StackUnderflow) => Err(VmError::StackUnderflow),
+                Err(e) => Err(e),
             },
             OpCode::Call(addr) => {
                 execution.call_stack.push(execution.ip);
@@ -176,8 +220,10 @@ impl OpCode {
             OpCode::ReceiveMessage => {
                 if let Some(message) = mailbox.recv().await {
                     log::info!("Received message: {:?}", message);
-                    execution.stack.push(message);
-                    Ok(())
+                    if let Value::Reference(address) = message {
+                        decrement_reference(heap, address)?;
+                    }
+                    push_value(execution, heap, message)
                 } else {
                     log::warn!("Mailbox is empty or closed");
                     Err(VmError::MailboxEmpty)
@@ -188,21 +234,22 @@ impl OpCode {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None);
                 vm.set_ip(*addr);
-                let address = _heap.allocate(HeapObject::Actor(vm, tx, 1));
-                execution.stack.push(Value::Reference(address));
-                Ok(())
+                let address = heap.allocate(HeapObject::Actor(vm, tx, 0));
+                push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SendMessage => {
-                let actor_ref = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
-                let message = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let actor_ref = pop_value(execution, heap)?;
+                let message = pop_value(execution, heap)?;
                 if let Value::Reference(address) = actor_ref {
-                    if let Some(HeapObject::Actor(_actor_vm, sender, _)) = _heap.get(address) {
-                        sender.send(message).await.map_err(VmError::from)?;
-                        execution.stack.push(Value::Reference(address));
-                        Ok(())
-                    } else {
-                        Err(VmError::InvalidReference)
+                    let sender = match heap.get(address) {
+                        Some(HeapObject::Actor(_actor_vm, sender, _)) => sender.clone(),
+                        _ => return Err(VmError::InvalidReference),
+                    };
+                    if let Value::Reference(message_address) = message {
+                        increment_reference(heap, message_address)?;
                     }
+                    sender.send(message).await.map_err(VmError::from)?;
+                    push_value(execution, heap, Value::Reference(address))
                 } else {
                     Err(VmError::InvalidReference)
                 }
@@ -211,34 +258,31 @@ impl OpCode {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None);
                 vm.set_ip(*addr);
-                let address = _heap.allocate(HeapObject::Supervisor(vm, tx, 1));
-                execution.stack.push(Value::Reference(address));
-                Ok(())
+                let address = heap.allocate(HeapObject::Supervisor(vm, tx, 0));
+                push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SetStrategy(strategy) => {
-                let sup_ref = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let sup_ref = pop_value(execution, heap)?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
+                    if let Some(HeapObject::Supervisor(vm, _, _)) = heap.get_mut(addr) {
                         vm.set_strategy(*strategy);
-                        execution.stack.push(Value::Reference(addr));
-                        Ok(())
                     } else {
-                        Err(VmError::InvalidReference)
+                        return Err(VmError::InvalidReference);
                     }
+                    push_value(execution, heap, Value::Reference(addr))
                 } else {
                     Err(VmError::InvalidReference)
                 }
             }
             OpCode::RestartChild(child) => {
-                let sup_ref = execution.stack.pop().ok_or(VmError::StackUnderflow)?;
+                let sup_ref = pop_value(execution, heap)?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _, _)) = _heap.get_mut(addr) {
+                    if let Some(HeapObject::Supervisor(vm, _, _)) = heap.get_mut(addr) {
                         vm.restart_child(*child);
-                        execution.stack.push(Value::Reference(addr));
-                        Ok(())
                     } else {
-                        Err(VmError::InvalidReference)
+                        return Err(VmError::InvalidReference);
                     }
+                    push_value(execution, heap, Value::Reference(addr))
                 } else {
                     Err(VmError::InvalidReference)
                 }
