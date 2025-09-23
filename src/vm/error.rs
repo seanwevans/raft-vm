@@ -49,4 +49,3 @@ impl From<SendError<Value>> for VmError {
         VmError::ChannelSend(err.to_string())
     }
 }
-

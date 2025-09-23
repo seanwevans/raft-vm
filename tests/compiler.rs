@@ -1,8 +1,8 @@
 use raft::compiler::{Compiler, CompilerError};
+use raft::run;
 use raft::vm::opcodes::OpCode;
 use raft::vm::value::Value;
 use raft::vm::VmError;
-use raft::run;
 
 #[test]
 fn compile_arithmetic_tokens() {
@@ -39,8 +39,12 @@ fn compile_float_tokens() {
     let source = "3.14 2.0 +";
     let bytecode = Compiler::compile(source).unwrap();
     assert_eq!(bytecode.len(), 3);
-    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.14).abs() < f64::EPSILON));
-    assert!(matches!(bytecode[1], OpCode::PushConst(Value::Float(f)) if (f - 2.0).abs() < f64::EPSILON));
+    assert!(
+        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.14).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(bytecode[1], OpCode::PushConst(Value::Float(f)) if (f - 2.0).abs() < f64::EPSILON)
+    );
     assert!(matches!(bytecode[2], OpCode::Add));
 }
 
@@ -49,8 +53,28 @@ fn compile_boolean_tokens() {
     let source = "true false";
     let bytecode = Compiler::compile(source).unwrap();
     assert_eq!(bytecode.len(), 2);
-    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Boolean(true))));
-    assert!(matches!(bytecode[1], OpCode::PushConst(Value::Boolean(false))));
+    assert!(matches!(
+        bytecode[0],
+        OpCode::PushConst(Value::Boolean(true))
+    ));
+    assert!(matches!(
+        bytecode[1],
+        OpCode::PushConst(Value::Boolean(false))
+    ));
+}
+
+#[test]
+fn compile_actor_and_supervisor_tokens() {
+    let source =
+        "SpawnActor 4 SendMessage ReceiveMessage SpawnSupervisor 8 SetStrategy 2 RestartChild 1";
+    let bytecode = Compiler::compile(source).unwrap();
+    assert_eq!(bytecode.len(), 6);
+    assert!(matches!(bytecode[0], OpCode::SpawnActor(4)));
+    assert!(matches!(bytecode[1], OpCode::SendMessage));
+    assert!(matches!(bytecode[2], OpCode::ReceiveMessage));
+    assert!(matches!(bytecode[3], OpCode::SpawnSupervisor(8)));
+    assert!(matches!(bytecode[4], OpCode::SetStrategy(2)));
+    assert!(matches!(bytecode[5], OpCode::RestartChild(1)));
 }
 
 #[test]
@@ -67,12 +91,15 @@ fn invalid_address_returns_error() {
 
 #[test]
 fn parse_error_returns_error() {
-    let err = Compiler::compile("1.." ).unwrap_err();
+    let err = Compiler::compile("1..").unwrap_err();
     assert!(matches!(err, CompilerError::ParseError(m) if m.contains("1..")));
 }
 
 #[tokio::test]
 async fn run_propagates_compiler_error() {
     let err = run("bogus").await.expect_err("expected compile error");
-    assert!(matches!(err, VmError::CompilationError(CompilerError::InvalidToken(_))));
+    assert!(matches!(
+        err,
+        VmError::CompilationError(CompilerError::InvalidToken(_))
+    ));
 }
