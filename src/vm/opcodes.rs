@@ -151,16 +151,10 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::JumpIfFalse(target) => {
-                match execution.stack.pop() {
-                    Some(Value::Boolean(false)) => {
-                        execution.ip = *target;
-                        Ok(())
-                    }
-                    Some(Value::Boolean(true)) => Ok(()),
-                    Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
-                    None => Err(VmError::StackUnderflowFor("JumpIfFalse")),
-
+            OpCode::JumpIfFalse(target) => match execution.stack.pop() {
+                Some(Value::Boolean(false)) => {
+                    execution.ip = *target;
+                    Ok(())
                 }
                 Some(Value::Boolean(true)) => Ok(()),
                 Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),

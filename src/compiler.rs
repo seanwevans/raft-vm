@@ -41,31 +41,83 @@ impl Compiler {
                     "Neg" => bytecode.push(OpCode::Neg),
                     "Exp" | "^" => bytecode.push(OpCode::Exp),
                     "Jump" => {
-                        let addr_token = tokens
-                            .next()
-                            .ok_or_else(|| CompilerError::InvalidAddress("expected address after Jump".into()))?;
+                        let addr_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress("expected address after Jump".into())
+                        })?;
                         let addr = addr_token
                             .parse::<usize>()
                             .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::Jump(addr));
                     }
                     "JumpIfFalse" => {
-                        let addr_token = tokens
-                            .next()
-                            .ok_or_else(|| CompilerError::InvalidAddress("expected address after JumpIfFalse".into()))?;
+                        let addr_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected address after JumpIfFalse".into(),
+                            )
+                        })?;
                         let addr = addr_token
                             .parse::<usize>()
                             .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::JumpIfFalse(addr));
                     }
                     "Call" => {
-                        let addr_token = tokens
-                            .next()
-                            .ok_or_else(|| CompilerError::InvalidAddress("expected address after Call".into()))?;
+                        let addr_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress("expected address after Call".into())
+                        })?;
                         let addr = addr_token
                             .parse::<usize>()
                             .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::Call(addr));
+                    }
+                    "SpawnActor" => {
+                        let addr_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected address after SpawnActor".into(),
+                            )
+                        })?;
+                        let addr = addr_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
+                        bytecode.push(OpCode::SpawnActor(addr));
+                    }
+                    "SendMessage" => {
+                        bytecode.push(OpCode::SendMessage);
+                    }
+                    "ReceiveMessage" => {
+                        bytecode.push(OpCode::ReceiveMessage);
+                    }
+                    "SpawnSupervisor" => {
+                        let addr_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected address after SpawnSupervisor".into(),
+                            )
+                        })?;
+                        let addr = addr_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
+                        bytecode.push(OpCode::SpawnSupervisor(addr));
+                    }
+                    "SetStrategy" => {
+                        let strategy_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected strategy after SetStrategy".into(),
+                            )
+                        })?;
+                        let strategy = strategy_token.parse::<usize>().map_err(|_| {
+                            CompilerError::InvalidAddress(strategy_token.to_string())
+                        })?;
+                        bytecode.push(OpCode::SetStrategy(strategy));
+                    }
+                    "RestartChild" => {
+                        let child_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected child index after RestartChild".into(),
+                            )
+                        })?;
+                        let child = child_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(child_token.to_string()))?;
+                        bytecode.push(OpCode::RestartChild(child));
                     }
                     "Return" => bytecode.push(OpCode::Return),
                     _ => return Err(CompilerError::InvalidToken(token.to_string())),
