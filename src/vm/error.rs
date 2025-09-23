@@ -43,9 +43,3 @@ impl From<&str> for VmError {
         VmError::Message(value.to_string())
     }
 }
-
-impl From<SendError<Value>> for VmError {
-    fn from(err: SendError<Value>) -> Self {
-        VmError::ChannelSend(err.to_string())
-    }
-}
