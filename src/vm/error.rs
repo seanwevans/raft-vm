@@ -32,12 +32,6 @@ pub enum VmError {
     CompilationError(#[from] CompilerError),
 }
 
-impl From<SendError<Value>> for VmError {
-    fn from(err: SendError<Value>) -> Self {
-        VmError::ChannelSend(err.to_string())
-    }
-}
-
 impl From<String> for VmError {
     fn from(value: String) -> Self {
         VmError::Message(value)
