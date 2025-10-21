@@ -1,4 +1,5 @@
 # Raft - A Lightweight Virtual Machine for Concurrent Systems
+<img width="256" alt="raft in muted colors" src="https://github.com/user-attachments/assets/7d26552d-c53a-4440-bb0b-e09b6353cd07" />
 
 Raft is a lightweight, interpreted virtual machine (VM) designed to provide 
 robust concurrency, fault tolerance, and actor-based message-passing models. 
