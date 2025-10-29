@@ -27,10 +27,11 @@ impl Actor {
 
     /// Send a message to the actor's mailbox.
     pub async fn send(&self, msg: Value) -> Result<(), VmError> {
-        self.sender
-            .send(msg)
-            .await
-            .map_err(|e| VmError::ChannelSend(e.to_string()))
+        self.sender.send(msg).await.map_err(|e| {
+            let error = e.to_string();
+            let value = e.0;
+            VmError::ChannelSend { error, value }
+        })
     }
 
     /// Execute the actor until its VM halts.

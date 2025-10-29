@@ -205,10 +205,9 @@ impl OpCode {
                     execution.ip = *target;
                     Ok(())
                 }
-                Ok(Value::Boolean(true)) => Ok(()),
-                Ok(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
-                Err(VmError::StackUnderflow) => Err(VmError::StackUnderflow),
-                Err(e) => Err(e),
+                Some(Value::Boolean(true)) => Ok(()),
+                Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
+                None => Err(VmError::StackUnderflow),
             },
             OpCode::Call(addr) => {
                 execution.call_stack.push(execution.ip);
@@ -254,8 +253,20 @@ impl OpCode {
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    sender.send(message).await.map_err(VmError::from)?;
-                    push_value(execution, heap, Value::Reference(address))
+                    match sender.send(message).await {
+                        Ok(()) => push_value(execution, heap, Value::Reference(address)),
+                        Err(err) => {
+                            let error = err.to_string();
+                            let failed_message = err.0;
+                            if let Value::Reference(message_address) = failed_message {
+                                decrement_reference(heap, message_address)?;
+                            }
+                            Err(VmError::ChannelSend {
+                                error,
+                                value: failed_message,
+                            })
+                        }
+                    }
                 } else {
                     Err(VmError::InvalidReference)
                 }
