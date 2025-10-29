@@ -64,6 +64,40 @@ fn compile_boolean_tokens() {
 }
 
 #[test]
+fn compile_variable_and_stack_tokens() {
+    let source = "1 StoreVar 0 LoadVar 0 Dup Swap Pop";
+    let bytecode = Compiler::compile(source).unwrap();
+    assert_eq!(bytecode.len(), 6);
+    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Integer(1))));
+    assert!(matches!(bytecode[1], OpCode::StoreVar(0)));
+    assert!(matches!(bytecode[2], OpCode::LoadVar(0)));
+    assert!(matches!(bytecode[3], OpCode::Dup));
+    assert!(matches!(bytecode[4], OpCode::Swap));
+    assert!(matches!(bytecode[5], OpCode::Pop));
+}
+
+#[test]
+fn variable_tokens_reject_invalid_operands() {
+    let missing_store = Compiler::compile("StoreVar").unwrap_err();
+    assert!(matches!(
+        missing_store,
+        CompilerError::InvalidAddress(msg) if msg.contains("StoreVar")
+    ));
+
+    let missing_load = Compiler::compile("LoadVar").unwrap_err();
+    assert!(matches!(
+        missing_load,
+        CompilerError::InvalidAddress(msg) if msg.contains("LoadVar")
+    ));
+
+    let invalid_index = Compiler::compile("LoadVar foo").unwrap_err();
+    assert!(matches!(
+        invalid_index,
+        CompilerError::InvalidAddress(msg) if msg == "foo"
+    ));
+}
+
+#[test]
 fn compile_actor_and_supervisor_tokens() {
     let source =
         "SpawnActor 4 SendMessage ReceiveMessage SpawnSupervisor 8 SetStrategy 2 RestartChild 1";
