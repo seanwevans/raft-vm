@@ -33,6 +33,31 @@ impl Compiler {
                 bytecode.push(OpCode::PushConst(Value::Integer(num)));
             } else {
                 match token {
+                    "StoreVar" => {
+                        let index_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected variable index after StoreVar".into(),
+                            )
+                        })?;
+                        let index = index_token.parse::<usize>().map_err(|_| {
+                            CompilerError::InvalidAddress(index_token.to_string())
+                        })?;
+                        bytecode.push(OpCode::StoreVar(index));
+                    }
+                    "LoadVar" => {
+                        let index_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected variable index after LoadVar".into(),
+                            )
+                        })?;
+                        let index = index_token.parse::<usize>().map_err(|_| {
+                            CompilerError::InvalidAddress(index_token.to_string())
+                        })?;
+                        bytecode.push(OpCode::LoadVar(index));
+                    }
+                    "Pop" => bytecode.push(OpCode::Pop),
+                    "Dup" => bytecode.push(OpCode::Dup),
+                    "Swap" => bytecode.push(OpCode::Swap),
                     "+" | "Add" => bytecode.push(OpCode::Add),
                     "-" | "Sub" => bytecode.push(OpCode::Sub),
                     "*" | "Mul" => bytecode.push(OpCode::Mul),
