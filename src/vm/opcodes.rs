@@ -258,9 +258,11 @@ impl OpCode {
                         Err(err) => {
                             let error = err.to_string();
                             let failed_message = err.0;
-                            if let Value::Reference(message_address) = failed_message {
-                                decrement_reference(heap, message_address)?;
-                            }
+                            // Keep the recovered message alive so that callers can
+                            // safely inspect or resend it from the returned error.
+                            // The send attempt already incremented the reference
+                            // count to transfer ownership to the channel, so we
+                            // intentionally skip the corresponding decrement here.
                             Err(VmError::ChannelSend {
                                 error,
                                 value: failed_message,

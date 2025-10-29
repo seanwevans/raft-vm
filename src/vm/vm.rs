@@ -243,7 +243,10 @@ mod tests {
         }
 
         if let Some(HeapObject::Array(_, rc)) = vm.heap.get(message_addr) {
-            assert_eq!(*rc, 0, "message reference count should be 0 after failure");
+            assert_eq!(
+                *rc, 1,
+                "message reference count should stay alive while error holds it"
+            );
         } else {
             panic!("Expected HeapObject::Array");
         }
