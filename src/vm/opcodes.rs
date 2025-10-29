@@ -200,8 +200,8 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::JumpIfFalse(target) => match execution.stack.pop() {
-                Some(Value::Boolean(false)) => {
+            OpCode::JumpIfFalse(target) => match pop_value(execution, heap) {
+                Ok(Value::Boolean(false)) => {
                     execution.ip = *target;
                     Ok(())
                 }
