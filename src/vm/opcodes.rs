@@ -196,20 +196,48 @@ impl OpCode {
                 _ => Err(VmError::TypeMismatch("Exp")),
             }),
             OpCode::Jump(target) => {
+                if *target > execution.bytecode.len() {
+                    log::error!(
+                        "Jump target {} out of bounds (bytecode length {})",
+                        target,
+                        execution.bytecode.len()
+                    );
+                    return Err(VmError::ExecutionOutOfBounds);
+                }
+
                 execution.ip = *target;
                 Ok(())
             }
 
-            OpCode::JumpIfFalse(target) => match pop_value(execution, heap) {
-                Ok(Value::Boolean(false)) => {
-                    execution.ip = *target;
-                    Ok(())
+            OpCode::JumpIfFalse(target) => {
+                let value = pop_value(execution, heap)?;
+                match value {
+                    Value::Boolean(false) => {
+                        if *target > execution.bytecode.len() {
+                            log::error!(
+                                "JumpIfFalse target {} out of bounds (bytecode length {})",
+                                target,
+                                execution.bytecode.len()
+                            );
+                            return Err(VmError::ExecutionOutOfBounds);
+                        }
+                        execution.ip = *target;
+                        Ok(())
+                    }
+                    Value::Boolean(true) => Ok(()),
+                    _ => Err(VmError::TypeMismatch("JumpIfFalse")),
                 }
-                Some(Value::Boolean(true)) => Ok(()),
-                Some(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
-                None => Err(VmError::StackUnderflow),
-            },
+            }
             OpCode::Call(addr) => {
+                if *addr >= execution.bytecode.len() {
+                    log::error!(
+                        "Call target {} out of bounds (bytecode length {})",
+                        addr,
+                        execution.bytecode.len()
+                    );
+                    return Err(VmError::ExecutionOutOfBounds);
+                }
+
                 execution.call_stack.push(execution.ip);
                 execution.ip = *addr;
                 Ok(())
@@ -238,6 +266,14 @@ impl OpCode {
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None);
+                if *addr >= execution.bytecode.len() {
+                    log::error!(
+                        "SpawnActor target {} out of bounds (bytecode length {})",
+                        addr,
+                        execution.bytecode.len()
+                    );
+                    return Err(VmError::ExecutionOutOfBounds);
+                }
                 vm.set_ip(*addr);
                 let address = heap.allocate(HeapObject::Actor(vm, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
@@ -276,6 +312,14 @@ impl OpCode {
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None);
+                if *addr >= execution.bytecode.len() {
+                    log::error!(
+                        "SpawnSupervisor target {} out of bounds (bytecode length {})",
+                        addr,
+                        execution.bytecode.len()
+                    );
+                    return Err(VmError::ExecutionOutOfBounds);
+                }
                 vm.set_ip(*addr);
                 let address = heap.allocate(HeapObject::Supervisor(vm, tx, 0));
                 push_value(execution, heap, Value::Reference(address))

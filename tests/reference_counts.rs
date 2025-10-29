@@ -14,7 +14,7 @@ fn actor_ref_count(heap: &Heap, address: usize) -> usize {
 
 #[tokio::test]
 async fn actor_reference_lifecycle_on_stack() {
-    let mut execution = ExecutionContext::new(vec![]);
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (_tx, mut mailbox) = channel(1);
 
@@ -54,7 +54,7 @@ async fn actor_reference_lifecycle_on_stack() {
 
 #[tokio::test]
 async fn send_and_receive_message_updates_reference_counts() {
-    let mut execution = ExecutionContext::new(vec![]);
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (tx, mut mailbox) = channel(1);
 
