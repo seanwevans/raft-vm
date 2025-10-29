@@ -200,14 +200,13 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::JumpIfFalse(target) => match execution.stack.pop() {
-                Some(Value::Boolean(false)) => {
+            OpCode::JumpIfFalse(target) => match pop_value(execution, heap) {
+                Ok(Value::Boolean(false)) => {
                     execution.ip = *target;
                     Ok(())
                 }
                 Ok(Value::Boolean(true)) => Ok(()),
                 Ok(_) => Err(VmError::TypeMismatch("JumpIfFalse")),
-                Err(VmError::StackUnderflow) => Err(VmError::StackUnderflow),
                 Err(e) => Err(e),
             },
             OpCode::Call(addr) => {
