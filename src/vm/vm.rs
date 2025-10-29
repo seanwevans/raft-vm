@@ -2,7 +2,7 @@
 
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
-use crate::vm::heap::Heap;
+use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::opcodes::OpCode;
 use crate::vm::value::Value;
 
@@ -31,8 +31,39 @@ impl VM {
         )
     }
 
-    pub fn pop_stack(&mut self) -> Option<Value> {
-        self.execution.stack.pop()
+    pub fn pop_stack(&mut self) -> Result<Value, VmError> {
+        match self.execution.stack.pop() {
+            Some(value) => {
+                if let Value::Reference(address) = value {
+                    if let Some(object) = self.heap.get_mut(address) {
+                        object.decrement_ref();
+                    } else {
+                        log::error!("Attempted to pop invalid heap reference: {}", address);
+                        return Err(VmError::InvalidReference);
+                    }
+                }
+                Ok(value)
+            }
+            None => {
+                log::error!("Attempted to pop value from an empty stack");
+                Err(VmError::StackUnderflow)
+            }
+        }
+    }
+
+    pub fn collect_garbage(&mut self) {
+        self.heap.collect_garbage();
+    }
+
+    pub fn heap_ref_count(&self, address: usize) -> Option<usize> {
+        self.heap.get(address).map(|object| match object {
+            HeapObject::Array(_, rc)
+            | HeapObject::String(_, rc)
+            | HeapObject::NativeFunction(_, rc)
+            | HeapObject::Actor(_, _, rc)
+            | HeapObject::Supervisor(_, _, rc) => *rc,
+            HeapObject::Module { ref_count, .. } => *ref_count,
+        })
     }
 
     pub fn set_ip(&mut self, ip: usize) {
@@ -178,8 +209,8 @@ mod tests {
         vm.run().await.unwrap();
 
         // Actor reference should remain on stack after sending
-        let actor_addr = match vm.pop_stack() {
-            Some(Value::Reference(addr)) => addr,
+        let actor_addr = match vm.pop_stack().expect("pop_stack failed") {
+            Value::Reference(addr) => addr,
             other => panic!("Expected actor reference, got {:?}", other),
         };
 
@@ -187,7 +218,10 @@ mod tests {
         let actor_entry = vm.heap.get_mut(actor_addr).expect("actor not found");
         if let HeapObject::Actor(actor_vm, _sender, _) = actor_entry {
             actor_vm.run().await.unwrap();
-            assert_eq!(actor_vm.pop_stack(), Some(Value::Integer(42)));
+            assert_eq!(
+                actor_vm.pop_stack().expect("child pop_stack failed"),
+                Value::Integer(42)
+            );
         } else {
             panic!("Expected HeapObject::Actor");
         }
@@ -195,10 +229,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message_failure() {
+        use crate::vm::error::VmError;
         use crate::vm::HeapObject;
 
         let code = vec![
-            OpCode::PushConst(Value::Integer(1)),
+            OpCode::PushConst(Value::Null),
             OpCode::SpawnActor(4),
             OpCode::SendMessage,
             OpCode::Jump(5),
@@ -206,6 +241,9 @@ mod tests {
         ];
 
         let (mut vm, _tx) = VM::new(code, None);
+
+        let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
+        vm.execution.bytecode[0] = OpCode::PushConst(Value::Reference(message_addr));
 
         // Execute PushConst and SpawnActor
         vm.execution
@@ -230,6 +268,27 @@ mod tests {
 
         // SendMessage should now fail
         let result = vm.execution.step(&mut vm.heap, &mut vm.mailbox).await;
-        assert!(result.is_err());
+
+        match result {
+            Err(VmError::ChannelSend { value, .. }) => {
+                assert_eq!(value, Value::Reference(message_addr));
+            }
+            other => panic!("Expected ChannelSend error, got {:?}", other),
+        }
+
+        if let Some(HeapObject::Array(_, rc)) = vm.heap.get(message_addr) {
+            assert_eq!(
+                *rc, 1,
+                "message reference count should stay alive while error holds it"
+            );
+        } else {
+            panic!("Expected HeapObject::Array");
+        }
+
+        if let Some(HeapObject::Actor(_, _, rc)) = vm.heap.get(actor_addr) {
+            assert_eq!(*rc, 0, "actor reference count should be 0 after failure");
+        } else {
+            panic!("Expected HeapObject::Actor");
+        }
     }
 }

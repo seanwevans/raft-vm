@@ -81,14 +81,22 @@ Example `.raft` file:
 # push 1 and 2 on the stack and add them
 1 2 +
 
+# store the result, load it twice, and clean up the duplicate
+StoreVar 0
+LoadVar 0
+Dup
+Swap
+Pop
+
 # push a boolean and a float
 true 3.14
 ```
 
 The current compiler tokenizes whitespace separated integers, floats
-(tokens containing a decimal point), booleans (`true`/`false`) and basic
-arithmetic like `+`. Running the above file will leave `3`, `true`, and
-`3.14` on the VM's stack.
+(tokens containing a decimal point), booleans (`true`/`false`), basic
+arithmetic like `+`, and stack/variable keywords such as `StoreVar`,
+`LoadVar`, `Pop`, `Dup`, and `Swap`. Running the above file will leave
+`3`, `true`, and `3.14` on the VM's stack.
 
 ---
 

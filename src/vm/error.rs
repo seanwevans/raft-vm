@@ -26,8 +26,8 @@ pub enum VmError {
     InvalidReference,
     #[error("Mailbox empty")]
     MailboxEmpty,
-    #[error("Channel send error: {0}")]
-    ChannelSend(String),
+    #[error("Channel send error: {error}")]
+    ChannelSend { error: String, value: Value },
     #[error("Compilation error: {0}")]
     CompilationError(#[from] CompilerError),
 }
@@ -46,6 +46,8 @@ impl From<&str> for VmError {
 
 impl From<SendError<Value>> for VmError {
     fn from(err: SendError<Value>) -> Self {
-        VmError::ChannelSend(err.to_string())
+        let error = err.to_string();
+        let value = err.0;
+        VmError::ChannelSend { error, value }
     }
 }

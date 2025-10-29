@@ -2,6 +2,7 @@ use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject};
 use raft::vm::opcodes::OpCode;
 use raft::vm::value::Value;
+use raft::vm::vm::VM;
 use tokio::sync::mpsc::channel;
 
 fn actor_ref_count(heap: &Heap, address: usize) -> usize {
@@ -13,7 +14,7 @@ fn actor_ref_count(heap: &Heap, address: usize) -> usize {
 
 #[tokio::test]
 async fn actor_reference_lifecycle_on_stack() {
-    let mut execution = ExecutionContext::new(vec![]);
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (_tx, mut mailbox) = channel(1);
 
@@ -53,7 +54,7 @@ async fn actor_reference_lifecycle_on_stack() {
 
 #[tokio::test]
 async fn send_and_receive_message_updates_reference_counts() {
-    let mut execution = ExecutionContext::new(vec![]);
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (tx, mut mailbox) = channel(1);
 
@@ -130,4 +131,29 @@ async fn send_and_receive_message_updates_reference_counts() {
 
     heap.collect_garbage();
     assert!(heap.get(actor_b).is_none());
+}
+
+#[tokio::test]
+async fn vm_pop_stack_drops_actor_reference() {
+    let (mut vm, _tx) = VM::new(vec![OpCode::SpawnActor(0)], None);
+    vm.run().await.unwrap();
+
+    let actor_addr = match vm.pop_stack().expect("pop_stack should succeed") {
+        Value::Reference(addr) => addr,
+        other => panic!("Expected actor reference, got {other:?}"),
+    };
+
+    let ref_count = vm
+        .heap_ref_count(actor_addr)
+        .expect("expected actor to remain allocated");
+    assert_eq!(
+        ref_count, 0,
+        "actor reference count should drop to zero after pop"
+    );
+
+    vm.collect_garbage();
+    assert!(
+        vm.heap_ref_count(actor_addr).is_none(),
+        "actor should be collected after reference count reaches zero"
+    );
 }
