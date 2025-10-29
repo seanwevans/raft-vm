@@ -229,10 +229,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_message_failure() {
+        use crate::vm::error::VmError;
         use crate::vm::HeapObject;
 
         let code = vec![
-            OpCode::PushConst(Value::Integer(1)),
+            OpCode::PushConst(Value::Null),
             OpCode::SpawnActor(4),
             OpCode::SendMessage,
             OpCode::Jump(5),
@@ -240,6 +241,9 @@ mod tests {
         ];
 
         let (mut vm, _tx) = VM::new(code, None);
+
+        let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
+        vm.execution.bytecode[0] = OpCode::PushConst(Value::Reference(message_addr));
 
         // Execute PushConst and SpawnActor
         vm.execution
@@ -264,6 +268,27 @@ mod tests {
 
         // SendMessage should now fail
         let result = vm.execution.step(&mut vm.heap, &mut vm.mailbox).await;
-        assert!(result.is_err());
+
+        match result {
+            Err(VmError::ChannelSend { value, .. }) => {
+                assert_eq!(value, Value::Reference(message_addr));
+            }
+            other => panic!("Expected ChannelSend error, got {:?}", other),
+        }
+
+        if let Some(HeapObject::Array(_, rc)) = vm.heap.get(message_addr) {
+            assert_eq!(
+                *rc, 1,
+                "message reference count should stay alive while error holds it"
+            );
+        } else {
+            panic!("Expected HeapObject::Array");
+        }
+
+        if let Some(HeapObject::Actor(_, _, rc)) = vm.heap.get(actor_addr) {
+            assert_eq!(*rc, 0, "actor reference count should be 0 after failure");
+        } else {
+            panic!("Expected HeapObject::Actor");
+        }
     }
 }
