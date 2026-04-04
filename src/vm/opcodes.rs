@@ -247,7 +247,8 @@ impl OpCode {
                     execution.ip = return_addr;
                     Ok(())
                 } else {
-                    Err(VmError::StackUnderflow)
+                    execution.ip = execution.bytecode.len();
+                    Ok(())
                 }
             }
             OpCode::ReceiveMessage => {

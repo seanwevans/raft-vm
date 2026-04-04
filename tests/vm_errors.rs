@@ -88,3 +88,11 @@ async fn spawn_supervisor_out_of_bounds_returns_error() {
         .expect_err("expected execution out of bounds for spawn supervisor");
     assert!(matches!(err, VmError::ExecutionOutOfBounds));
 }
+
+#[tokio::test]
+async fn top_level_return_gracefully_halts_vm() {
+    let code = vec![OpCode::Return];
+    let (mut vm, _tx) = VM::new(code, None);
+    let result = vm.run().await;
+    assert!(result.is_ok(), "expected top-level return to halt gracefully");
+}
