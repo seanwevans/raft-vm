@@ -280,6 +280,9 @@ impl OpCode {
                 push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SendMessage => {
+                // SendMessage has stack-stable behavior for actor references:
+                // the actor reference is present on the stack after the opcode
+                // finishes, regardless of success or failure.
                 let actor_ref = pop_value(execution, heap)?;
                 let message = pop_value(execution, heap)?;
                 if let Value::Reference(address) = actor_ref {
@@ -295,6 +298,7 @@ impl OpCode {
                         Err(err) => {
                             let error = err.to_string();
                             let failed_message = err.0;
+                            push_value(execution, heap, Value::Reference(address))?;
                             // Keep the recovered message alive so that callers can
                             // safely inspect or resend it from the returned error.
                             // The send attempt already incremented the reference

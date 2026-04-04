@@ -1,4 +1,7 @@
+use raft::vm::execution::ExecutionContext;
+use raft::vm::heap::{Heap, HeapObject};
 use raft::vm::{error::VmError, opcodes::OpCode, value::Value, vm::VM};
+use tokio::sync::mpsc::channel;
 
 #[tokio::test]
 async fn division_by_zero_returns_error() {
@@ -90,6 +93,74 @@ async fn spawn_supervisor_out_of_bounds_returns_error() {
 }
 
 #[tokio::test]
+async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+    let mut heap = Heap::new();
+    let (_tx, mut mailbox) = channel(1);
+
+    // Stack layout expected by SendMessage is [message, actor_ref].
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .expect("spawn actor should succeed");
+    let actor_addr = match execution.stack.last().copied() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("expected actor reference, got {other:?}"),
+    };
+
+    let message_addr = heap.allocate(HeapObject::Array(vec![], 0));
+    OpCode::PushConst(Value::Reference(message_addr))
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .expect("push message reference should succeed");
+    OpCode::Swap
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .expect("swap should succeed");
+
+    // Close actor mailbox to force ChannelSend error.
+    let actor_entry = heap
+        .get_mut(actor_addr)
+        .expect("spawned actor should be in heap");
+    match actor_entry {
+        HeapObject::Actor(actor_vm, _, _) => actor_vm.mailbox.close(),
+        other => panic!("expected actor in heap, got {other:?}"),
+    }
+
+    let err = OpCode::SendMessage
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .expect_err("send should fail when mailbox is closed");
+
+    match err {
+        VmError::ChannelSend { value, .. } => {
+            assert_eq!(value, Value::Reference(message_addr));
+        }
+        other => panic!("expected ChannelSend error, got {other:?}"),
+    }
+
+    assert_eq!(
+        execution.stack,
+        vec![Value::Reference(actor_addr)],
+        "actor reference should be restored on failure",
+    );
+
+    match heap.get(actor_addr).expect("actor should remain allocated") {
+        HeapObject::Actor(_, _, rc) => assert_eq!(*rc, 1, "actor should have stack ref"),
+        other => panic!("expected actor at actor_addr, got {other:?}"),
+    }
+    match heap
+        .get(message_addr)
+        .expect("message object should remain allocated")
+    {
+        HeapObject::Array(_, rc) => {
+            assert_eq!(
+                *rc, 1,
+                "failed_message in ChannelSend should own exactly one reference",
+            )
+        }
+        other => panic!("expected array at message_addr, got {other:?}"),
+    }
 async fn top_level_return_gracefully_halts_vm() {
     let code = vec![OpCode::Return];
     let (mut vm, _tx) = VM::new(code, None);
