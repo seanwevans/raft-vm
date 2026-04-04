@@ -7,32 +7,28 @@ use crate::vm::value::Value;
 use crate::vm::vm::VM;
 use tokio::sync::mpsc::Receiver;
 
-fn unary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
+fn unary_op<F>(execution: &mut ExecutionContext, heap: &mut Heap, f: F) -> Result<(), VmError>
 where
     F: Fn(Value) -> Result<Value, VmError>,
 {
-    if let Some(v) = stack.pop() {
-        let result = f(v)?;
-        stack.push(result);
-        Ok(())
-    } else {
-        log::error!("Stack underflow during unary operation");
-        Err(VmError::StackUnderflow)
-    }
+    let v = pop_value(execution, heap)?;
+    let result = f(v)?;
+    execution.stack.push(result);
+    Ok(())
 }
 
-fn binary_op<F>(stack: &mut Vec<Value>, f: F) -> Result<(), VmError>
+fn binary_op<F>(execution: &mut ExecutionContext, heap: &mut Heap, f: F) -> Result<(), VmError>
 where
     F: Fn(Value, Value) -> Result<Value, VmError>,
 {
-    if stack.len() < 2 {
+    if execution.stack.len() < 2 {
         log::error!("Stack underflow during binary operation");
         return Err(VmError::StackUnderflow);
     }
-    let b = stack.pop().unwrap();
-    let a = stack.pop().unwrap();
+    let b = pop_value(execution, heap)?;
+    let a = pop_value(execution, heap)?;
     let result = f(a, b)?;
-    stack.push(result);
+    execution.stack.push(result);
     Ok(())
 }
 
@@ -123,11 +119,11 @@ impl OpCode {
         mailbox: &mut Receiver<Value>,
     ) -> Result<(), VmError> {
         match self {
-            OpCode::Add => binary_op(&mut execution.stack, |a, b| a.add(b)),
-            OpCode::Sub => binary_op(&mut execution.stack, |a, b| a.sub(b)),
-            OpCode::Mul => binary_op(&mut execution.stack, |a, b| a.mul(b)),
-            OpCode::Div => binary_op(&mut execution.stack, |a, b| a.div(b)),
-            OpCode::Neg => unary_op(&mut execution.stack, |a| match a {
+            OpCode::Add => binary_op(execution, heap, |a, b| a.add(b)),
+            OpCode::Sub => binary_op(execution, heap, |a, b| a.sub(b)),
+            OpCode::Mul => binary_op(execution, heap, |a, b| a.mul(b)),
+            OpCode::Div => binary_op(execution, heap, |a, b| a.div(b)),
+            OpCode::Neg => unary_op(execution, heap, |a| match a {
                 Value::Integer(i) => Ok(Value::Integer(-i)),
                 Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(VmError::TypeMismatch("Neg")),
@@ -174,7 +170,7 @@ impl OpCode {
                     Err(VmError::VariableNotFound(*index))
                 }
             }
-            OpCode::Mod => binary_op(&mut execution.stack, |a, b| match (a, b) {
+            OpCode::Mod => binary_op(execution, heap, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
                     if y == 0 {
                         Err(VmError::DivisionByZero)
@@ -184,7 +180,7 @@ impl OpCode {
                 }
                 _ => Err(VmError::TypeMismatch("Mod")),
             }),
-            OpCode::Exp => binary_op(&mut execution.stack, |a, b| match (a, b) {
+            OpCode::Exp => binary_op(execution, heap, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
                     if y < 0 {
                         Ok(Value::Float((x as f64).powi(y)))
