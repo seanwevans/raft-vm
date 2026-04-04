@@ -157,3 +157,84 @@ async fn vm_pop_stack_drops_actor_reference() {
         "actor should be collected after reference count reaches zero"
     );
 }
+
+#[tokio::test]
+async fn neg_type_mismatch_consumes_reference_operand() {
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+    let mut heap = Heap::new();
+    let (_tx, mut mailbox) = channel(1);
+
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .unwrap();
+
+    let address = match execution.stack.last().copied() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("Expected actor reference on stack, got {other:?}"),
+    };
+
+    let err = OpCode::Neg
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, raft::vm::error::VmError::TypeMismatch("Neg")));
+    assert!(execution.stack.is_empty(), "operand should be consumed");
+    assert_eq!(actor_ref_count(&heap, address), 0);
+
+    heap.collect_garbage();
+    assert!(heap.get(address).is_none());
+}
+
+#[tokio::test]
+async fn add_and_mod_type_mismatch_do_not_leak_references() {
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+    let mut heap = Heap::new();
+    let (_tx, mut mailbox) = channel(1);
+
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .unwrap();
+    let add_ref = match execution.stack.last().copied() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("Expected actor reference on stack, got {other:?}"),
+    };
+    execution.stack.push(Value::Integer(1));
+
+    let add_err = OpCode::Add
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        add_err,
+        raft::vm::error::VmError::TypeMismatch("Add")
+    ));
+    assert!(execution.stack.is_empty(), "operands should be consumed");
+    assert_eq!(actor_ref_count(&heap, add_ref), 0);
+
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .unwrap();
+    let mod_ref = match execution.stack.last().copied() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("Expected actor reference on stack, got {other:?}"),
+    };
+    execution.stack.push(Value::Integer(2));
+
+    let mod_err = OpCode::Mod
+        .execute(&mut execution, &mut heap, &mut mailbox)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        mod_err,
+        raft::vm::error::VmError::TypeMismatch("Mod")
+    ));
+    assert!(execution.stack.is_empty(), "operands should be consumed");
+    assert_eq!(actor_ref_count(&heap, mod_ref), 0);
+
+    heap.collect_garbage();
+    assert!(heap.get(add_ref).is_none());
+    assert!(heap.get(mod_ref).is_none());
+}
