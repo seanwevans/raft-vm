@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
-use crate::vm::opcodes::Bytecode;
+use crate::vm::opcodes::OpCode;
 use crate::vm::value::Value;
 
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -43,15 +43,16 @@ pub struct ExecutionContext {
     pub call_stack: Vec<usize>,
     pub bytecode: Vec<OpCode>,
     pub debug_info: Option<DebugInfo>,
+    mailbox: Receiver<Value>,
 }
 
 impl ExecutionContext {
-    pub fn new(bytecode: impl Into<Bytecode>) -> Self {
+    pub fn new(bytecode: Vec<OpCode>) -> Self {
         let (_tx, rx) = tokio::sync::mpsc::channel(100);
         Self::with_mailbox(bytecode, rx)
     }
 
-    pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
+    pub fn with_mailbox(bytecode: Vec<OpCode>, mailbox: Receiver<Value>) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
@@ -60,10 +61,15 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             bytecode,
             debug_info: None,
+            mailbox,
         }
     }
 
-    pub fn new_with_debug(bytecode: Vec<OpCode>, debug_info: Option<DebugInfo>) -> Self {
+    pub fn new_with_debug(
+        bytecode: Vec<OpCode>,
+        debug_info: Option<DebugInfo>,
+        mailbox: Receiver<Value>,
+    ) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
@@ -72,6 +78,7 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             bytecode,
             debug_info,
+            mailbox,
         }
     }
 
@@ -115,8 +122,7 @@ impl ExecutionContext {
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);
         opcode
-            .execute_with_process(self, heap, mailbox, process)
-            .await
+            .execute_with_process(self, heap, process)
             .map_err(|error| self.with_debug_location(error, instruction_ip))
     }
 
@@ -136,6 +142,10 @@ impl ExecutionContext {
             },
             None => error,
         }
+    }
+
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        &mut self.mailbox
     }
 
     pub fn ip(&self) -> usize {

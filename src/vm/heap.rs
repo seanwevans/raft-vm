@@ -2,9 +2,14 @@
 
 use crate::vm::error::VmError;
 use crate::vm::value::Value;
-use crate::vm::VM;
 use std::collections::HashMap;
-use tokio::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::task::JoinHandle;
+
+use crate::compiler::DebugInfo;
+use crate::vm::opcodes::OpCode;
+use crate::vm::supervision::{ChildSpec, SupervisorState, SupervisorStrategy};
 
 #[derive(Debug)]
 pub struct Heap {
@@ -20,6 +25,23 @@ pub struct NativeFunction {
 }
 
 #[derive(Debug)]
+pub struct ProcessHandle {
+    process_id: usize,
+    parent: Option<usize>,
+    start_ip: usize,
+    current_ip: usize,
+    bytecode: Vec<OpCode>,
+    debug_info: Option<DebugInfo>,
+    links: Vec<Sender<Value>>,
+    trap_exits: bool,
+    supervisor_state: SupervisorState,
+    task: Option<JoinHandle<Result<(), VmError>>>,
+    mailbox: Receiver<Value>,
+    mailbox_sender: Sender<Value>,
+    final_stack: Arc<Mutex<Vec<Value>>>,
+}
+
+#[derive(Debug)]
 pub enum HeapObject {
     Array(Vec<Value>, usize),
     String(String, usize),
@@ -29,8 +51,134 @@ pub enum HeapObject {
         ref_count: usize,
     },
     NativeFunction(NativeFunction, usize),
-    Actor(VM, Sender<Value>, usize),
-    Supervisor(VM, Sender<Value>, usize),
+    Actor(ProcessHandle, Sender<Value>, usize),
+    Supervisor(ProcessHandle, Sender<Value>, usize),
+}
+
+impl ProcessHandle {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        process_id: usize,
+        parent: Option<usize>,
+        start_ip: usize,
+        bytecode: Vec<OpCode>,
+        debug_info: Option<DebugInfo>,
+        links: Vec<Sender<Value>>,
+        trap_exits: bool,
+        task: JoinHandle<Result<(), VmError>>,
+        final_stack: Arc<Mutex<Vec<Value>>>,
+    ) -> Self {
+        let (mailbox_sender, mailbox) = tokio::sync::mpsc::channel(1);
+        Self {
+            process_id,
+            parent,
+            start_ip,
+            current_ip: start_ip,
+            bytecode,
+            debug_info,
+            links,
+            trap_exits,
+            supervisor_state: SupervisorState::default(),
+            task: Some(task),
+            mailbox,
+            mailbox_sender,
+            final_stack,
+        }
+    }
+
+    pub fn process_id(&self) -> usize {
+        self.process_id
+    }
+
+    pub fn parent(&self) -> Option<usize> {
+        self.parent
+    }
+
+    pub fn restart_ip(&self) -> usize {
+        self.start_ip
+    }
+
+    pub fn current_ip(&self) -> usize {
+        self.current_ip
+    }
+
+    pub fn set_ip(&mut self, ip: usize) {
+        self.current_ip = ip;
+    }
+
+    pub fn bytecode(&self) -> Vec<OpCode> {
+        self.bytecode.clone()
+    }
+
+    pub fn debug_info(&self) -> Option<DebugInfo> {
+        self.debug_info.clone()
+    }
+
+    pub fn links(&self) -> Vec<Sender<Value>> {
+        self.links.clone()
+    }
+
+    pub fn trap_exits(&self) -> bool {
+        self.trap_exits
+    }
+
+    pub fn replace_task(&mut self, task: JoinHandle<Result<(), VmError>>, start_ip: usize) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
+        self.task = Some(task);
+        self.start_ip = start_ip;
+        self.current_ip = start_ip;
+    }
+
+    pub async fn run(&mut self) -> Result<(), VmError> {
+        match self.task.take() {
+            Some(task) => match task.await {
+                Ok(result) => result,
+                Err(err) if err.is_cancelled() => Ok(()),
+                Err(err) => Err(VmError::Message(err.to_string())),
+            },
+            None => Ok(()),
+        }
+    }
+
+    pub fn pop_stack(&mut self) -> Result<Value, VmError> {
+        self.final_stack
+            .lock()
+            .map_err(|err| VmError::Message(err.to_string()))?
+            .pop()
+            .ok_or(VmError::StackUnderflow)
+    }
+
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        &mut self.mailbox
+    }
+
+    pub fn is_mailbox_closed(&self) -> bool {
+        self.mailbox.is_closed()
+    }
+
+    pub fn mailbox_sender(&self) -> Sender<Value> {
+        self.mailbox_sender.clone()
+    }
+
+    pub fn set_strategy(&mut self, strategy: usize) {
+        let strategy = SupervisorStrategy::from_usize(strategy);
+        self.supervisor_state.set_strategy(strategy);
+        log::info!("Set supervisor strategy to {:?}", strategy);
+    }
+
+    pub fn strategy(&self) -> SupervisorStrategy {
+        self.supervisor_state.strategy()
+    }
+
+    pub fn supervised_children(&self) -> &[ChildSpec] {
+        self.supervisor_state.children()
+    }
+
+    pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
+        self.supervisor_state.restart_targets(child)
+    }
 }
 
 impl Default for Heap {
