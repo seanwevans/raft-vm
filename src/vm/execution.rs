@@ -48,7 +48,7 @@ pub struct ExecutionContext {
 }
 
 impl ExecutionContext {
-    pub fn new(bytecode: impl Into<Bytecode>) -> Self {
+    pub fn new(bytecode: Vec<OpCode>) -> Self {
         let (_tx, rx) = tokio::sync::mpsc::channel(100);
         Self::with_mailbox(bytecode, rx)
     }
@@ -88,6 +88,7 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             bytecode: bytecode.into(),
             debug_info,
+            mailbox,
         }
     }
 
@@ -151,6 +152,10 @@ impl ExecutionContext {
             },
             None => error,
         }
+    }
+
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        &mut self.mailbox
     }
 
     pub fn ip(&self) -> usize {

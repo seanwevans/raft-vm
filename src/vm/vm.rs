@@ -314,12 +314,25 @@ impl VM {
     pub fn reset_for_restart(&mut self, start_ip: usize) {
         let bytecode = self.execution.bytecode.clone();
         let debug_info = self.execution.debug_info.clone();
-        self.execution = ExecutionContext::new_with_debug(bytecode, debug_info);
+        let (_tx, rx) = mpsc::channel(100);
+        self.execution = ExecutionContext::new_with_debug(bytecode, debug_info, rx);
         self.execution.ip = start_ip;
     }
 
     pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
         self.execution.mailbox_mut()
+    }
+
+    pub fn bytecode(&self) -> Vec<OpCode> {
+        self.execution.bytecode.clone()
+    }
+
+    pub fn debug_info(&self) -> Option<DebugInfo> {
+        self.execution.debug_info.clone()
+    }
+
+    pub fn links(&self) -> Vec<Sender<Value>> {
+        self.links.clone()
     }
 
     async fn notify_links(&self, error: &VmError) {

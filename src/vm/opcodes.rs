@@ -2,11 +2,12 @@
 
 use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState, ProcessContext};
-use crate::vm::heap::{Heap, HeapObject, NativeFunction};
+use crate::vm::heap::{Heap, HeapObject, NativeFunction, ProcessHandle};
 use crate::vm::supervision::ChildSpec;
 use crate::vm::value::Value;
 use crate::vm::vm::VM;
-use tokio::sync::mpsc::{self, error::TrySendError};
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::error::TrySendError;
 
 fn unary_op<F>(execution: &mut ExecutionContext, heap: &mut Heap, f: F) -> Result<(), VmError>
 where
@@ -68,20 +69,88 @@ fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
 
 fn actor_start_ip(heap: &Heap, address: usize) -> Result<usize, VmError> {
     match heap.get(address) {
-        Some(HeapObject::Actor(vm, _, _)) => Ok(vm.restart_ip()),
+        Some(HeapObject::Actor(process, _, _)) => Ok(process.restart_ip()),
         _ => Err(VmError::InvalidReference),
     }
 }
 
+fn run_process(
+    mut vm: VM,
+    final_stack: Arc<Mutex<Vec<Value>>>,
+) -> tokio::task::JoinHandle<Result<(), VmError>> {
+    tokio::spawn(async move {
+        let result = vm.run().await;
+        if let Ok(mut stack) = final_stack.lock() {
+            *stack = vm.stack().clone();
+        }
+        result
+    })
+}
+
+fn spawn_child_vm(
+    bytecode: Vec<OpCode>,
+    debug_info: Option<crate::compiler::DebugInfo>,
+    start_ip: usize,
+    parent: Option<&ProcessContext>,
+    trap_exits: bool,
+    links: Vec<tokio::sync::mpsc::Sender<Value>>,
+) -> (ProcessHandle, tokio::sync::mpsc::Sender<Value>) {
+    let (mut vm, tx) = VM::new_with_debug(bytecode, debug_info, None);
+    vm.set_ip(start_ip);
+    vm.set_restart_ip(start_ip);
+    vm.set_trap_exits(trap_exits);
+    for link in links {
+        vm.link(link);
+    }
+    if let Some(process) = parent {
+        vm.set_parent(process.process_id);
+        vm.link(process.self_sender.clone());
+        if process.trap_exits {
+            vm.set_trap_exits(true);
+        }
+    }
+
+    let handle = {
+        let process_id = vm.process_id();
+        let parent = vm.parent();
+        let bytecode = vm.bytecode();
+        let debug_info = vm.debug_info();
+        let links = vm.links();
+        let trap_exits = vm.trap_exits();
+        let final_stack = Arc::new(Mutex::new(Vec::new()));
+        let task = run_process(vm, final_stack.clone());
+        ProcessHandle::new(
+            process_id,
+            parent,
+            start_ip,
+            bytecode,
+            debug_info,
+            links,
+            trap_exits,
+            task,
+            final_stack,
+        )
+    };
+    (handle, tx)
+}
+
 fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
     match heap.get_mut(child.reference) {
-        Some(HeapObject::Actor(vm, sender, _)) => {
-            vm.reset_for_restart(child.start_ip);
-            let (replacement_tx, replacement_rx) = mpsc::channel(100);
-            *vm.mailbox_mut() = replacement_rx;
-            *sender = replacement_tx.clone();
-            // Keep the VM's self sender aligned with the mailbox sender stored in the heap.
-            vm.replace_sender(replacement_tx);
+        Some(HeapObject::Actor(process, sender, _)) => {
+            let (mut vm, replacement_tx) =
+                VM::new_with_debug(process.bytecode(), process.debug_info(), None);
+            vm.set_ip(child.start_ip);
+            vm.set_restart_ip(child.start_ip);
+            vm.set_trap_exits(process.trap_exits());
+            if let Some(parent) = process.parent() {
+                vm.set_parent(parent);
+            }
+            for link in process.links() {
+                vm.link(link);
+            }
+            *sender = replacement_tx;
+            let final_stack = Arc::new(Mutex::new(Vec::new()));
+            process.replace_task(run_process(vm, final_stack.clone()), child.start_ip);
             log::info!(
                 "Restarted actor {} at ip {}",
                 child.reference,
@@ -911,16 +980,15 @@ impl OpCode {
                     );
                     return Err(VmError::ExecutionOutOfBounds);
                 }
-                vm.set_ip(*addr);
-                vm.set_restart_ip(*addr);
-                if let Some(process) = &process {
-                    vm.set_parent(process.process_id);
-                    vm.link(process.self_sender.clone());
-                    if process.trap_exits {
-                        vm.set_trap_exits(true);
-                    }
-                }
-                let address = heap.allocate(HeapObject::Actor(vm, tx, 0));
+                let (handle, tx) = spawn_child_vm(
+                    execution.bytecode.clone(),
+                    execution.debug_info.clone(),
+                    *addr,
+                    process.as_ref(),
+                    false,
+                    Vec::new(),
+                );
+                let address = heap.allocate(HeapObject::Actor(handle, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SendMessage => {
@@ -930,15 +998,26 @@ impl OpCode {
                 let actor_ref = pop_value(execution, heap)?;
                 let message = pop_value(execution, heap)?;
                 if let Value::Reference(address) = actor_ref {
-                    let sender = match heap.get(address) {
-                        Some(HeapObject::Actor(_actor_vm, sender, _)) => sender.clone(),
+                    let (sender, mailbox_closed, compatibility_sender) = match heap.get(address) {
+                        Some(HeapObject::Actor(process, sender, _)) => (
+                            sender.clone(),
+                            process.is_mailbox_closed(),
+                            process.mailbox_sender(),
+                        ),
                         _ => return Err(VmError::InvalidReference),
                     };
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    match sender.try_send(message) {
-                        Ok(()) => push_value(execution, heap, Value::Reference(address)),
+                    match if mailbox_closed {
+                        Err(TrySendError::Closed(message))
+                    } else {
+                        sender.try_send(message)
+                    } {
+                        Ok(()) => {
+                            let _ = compatibility_sender.try_send(message);
+                            push_value(execution, heap, Value::Reference(address))
+                        }
                         Err(TrySendError::Full(message)) => {
                             return Ok(ExecutionState::Yield(BlockingOperation::SendMessage {
                                 sender,
@@ -970,14 +1049,15 @@ impl OpCode {
                     );
                     return Err(VmError::ExecutionOutOfBounds);
                 }
-                vm.set_ip(*addr);
-                vm.set_restart_ip(*addr);
-                vm.set_trap_exits(true);
-                if let Some(process) = &process {
-                    vm.set_parent(process.process_id);
-                    vm.link(process.self_sender.clone());
-                }
-                let address = heap.allocate(HeapObject::Supervisor(vm, tx, 0));
+                let (handle, tx) = spawn_child_vm(
+                    execution.bytecode.clone(),
+                    execution.debug_info.clone(),
+                    *addr,
+                    process.as_ref(),
+                    true,
+                    Vec::new(),
+                );
+                let address = heap.allocate(HeapObject::Supervisor(handle, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SetStrategy(strategy) => {
