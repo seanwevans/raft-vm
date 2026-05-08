@@ -18,7 +18,9 @@ pub enum Value {
 impl Value {
     pub fn checked_add(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
-            (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
+            (Value::Integer(a), Value::Integer(b)) => i32::checked_add(a, b)
+                .map(Value::Integer)
+                .ok_or(VmError::IntegerOverflow),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             _ => Err(VmError::TypeMismatch("Add")),
         }
@@ -26,7 +28,9 @@ impl Value {
 
     pub fn checked_sub(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
-            (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
+            (Value::Integer(a), Value::Integer(b)) => i32::checked_sub(a, b)
+                .map(Value::Integer)
+                .ok_or(VmError::IntegerOverflow),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             _ => Err(VmError::TypeMismatch("Sub")),
         }
@@ -34,7 +38,9 @@ impl Value {
 
     pub fn checked_mul(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
-            (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
+            (Value::Integer(a), Value::Integer(b)) => i32::checked_mul(a, b)
+                .map(Value::Integer)
+                .ok_or(VmError::IntegerOverflow),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
             _ => Err(VmError::TypeMismatch("Mul")),
         }
