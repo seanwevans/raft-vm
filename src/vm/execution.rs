@@ -39,7 +39,7 @@ impl ExecutionContext {
             return Err(VmError::ExecutionOutOfBounds);
         }
 
-        let opcode = self.bytecode[self.ip].clone();
+        let opcode = self.bytecode[self.ip];
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);
