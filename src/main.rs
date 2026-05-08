@@ -11,7 +11,6 @@ use std::fs;
 use std::process;
 
 use raft::compiler::{Compiler, CompilerError};
-use raft::vm::value::Value;
 use raft::vm::{VmError, VM};
 
 use std::io::Write;
@@ -66,17 +65,7 @@ async fn handle_run(filename: &str) {
                     process::exit(1);
                 }
             };
-            let (mut vm, tx) = VM::new(bytecode, None);
-
-            // Simulate sending messages to the VM
-            tokio::spawn(async move {
-                if let Err(e) = tx.send(Value::Integer(42)).await {
-                    eprintln!("Send error: {}", e);
-                }
-                if let Err(e) = tx.send(Value::Boolean(true)).await {
-                    eprintln!("Send error: {}", e);
-                }
-            });
+            let (mut vm, _tx) = VM::new(bytecode, None);
 
             if let Err(e) = vm.run().await {
                 eprintln!("Execution error: {}", e);
