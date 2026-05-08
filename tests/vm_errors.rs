@@ -92,6 +92,28 @@ async fn spawn_supervisor_out_of_bounds_returns_error() {
 }
 
 #[tokio::test]
+async fn spawn_actor_at_bytecode_len_returns_error() {
+    let code = vec![OpCode::SpawnActor(1)];
+    let (mut vm, _tx) = VM::new(code, None);
+    let err = vm
+        .run()
+        .await
+        .expect_err("expected execution out of bounds for spawn actor at bytecode length");
+    assert!(matches!(err, VmError::ExecutionOutOfBounds));
+}
+
+#[tokio::test]
+async fn spawn_supervisor_at_bytecode_len_returns_error() {
+    let code = vec![OpCode::SpawnSupervisor(1)];
+    let (mut vm, _tx) = VM::new(code, None);
+    let err = vm
+        .run()
+        .await
+        .expect_err("expected execution out of bounds for spawn supervisor at bytecode length");
+    assert!(matches!(err, VmError::ExecutionOutOfBounds));
+}
+
+#[tokio::test]
 async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
