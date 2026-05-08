@@ -5,6 +5,7 @@ pub mod execution;
 pub mod heap;
 pub mod opcodes;
 pub mod value;
+#[allow(clippy::module_inception)]
 pub mod vm;
 
 pub use crate::vm::error::VmError;

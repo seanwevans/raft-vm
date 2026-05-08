@@ -33,6 +33,12 @@ pub enum HeapObject {
     Supervisor(VM, Sender<Value>, usize),
 }
 
+impl Default for Heap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Heap {
     pub fn new() -> Self {
         Self {

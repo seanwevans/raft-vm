@@ -19,7 +19,7 @@ a simple and extensible design.
 - **Dynamic Heap Management**: Allocates and manages memory with garbage 
                                collection and safe reference counting.
 - **Extensibility**: Designed for modular expansion of opcodes, heap structures,
-                     and execution behaviors.
+                     native standard-library bindings, and execution behaviors.
 
 ---
 
@@ -98,6 +98,18 @@ arithmetic like `+`, and stack/variable keywords such as `StoreVar`,
 `LoadVar`, `Pop`, `Dup`, and `Swap`. Running the above file will leave
 `3`, `true`, and `3.14` on the VM's stack.
 
+Native standard-library functions are injected when a VM starts. For example,
+`io.print` loads the standard `io` module's `print` export, and `CallNative 1`
+invokes it with one stack argument:
+
+```
+42 io.print CallNative 1
+```
+
+The REPL keeps running after compiler or runtime errors. Enter a trailing `\`
+or an incomplete instruction such as `StoreVar` to continue on the next line;
+enter `exit` at a fresh prompt to quit.
+
 ---
 
 ## Architecture
@@ -113,15 +125,17 @@ arithmetic like `+`, and stack/variable keywords such as `StoreVar`,
                stack manipulation, and control flow.
  
 ### Platform Integration
-The VM operates solely through its runtime and message-passing interfaces.
-Platform-specific hooks can be added by extending opcodes or runtime components
-as needed.
+The VM operates through its runtime, message-passing interfaces, and native
+standard-library bindings. Host Rust functions can be registered as heap-backed
+native functions and exposed through modules such as `io`, allowing platform I/O
+without adding dedicated I/O bytecode instructions.
 
 ### Opcodes
 Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Arithmetic**: `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Neg`, `Exp`
 - **Stack**: `PushConst`, `Pop`, `Dup`, `Swap`
-- **Control Flow**: `Jump`, `JumpIfFalse`, `Call`, `Return`
+- **Modules/Globals**: `LoadGlobal`, `GetExport`, `CallNative`
+- **Control Flow**: `Jump`, `JumpIfFalse`, `Call`, `CallNative`, `Return`
 - **Actor Management**: `SpawnActor`, `SendMessage`, `ReceiveMessage`
 - **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
 

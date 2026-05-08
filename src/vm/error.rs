@@ -22,6 +22,10 @@ pub enum VmError {
     NoBytecode,
     #[error("Variable at index {0} not found")]
     VariableNotFound(usize),
+    #[error("Global `{0}` not found")]
+    GlobalNotFound(String),
+    #[error("Export `{export}` not found in module `{module}`")]
+    ExportNotFound { module: String, export: String },
     #[error("Invalid reference")]
     InvalidReference,
     #[error("Mailbox empty")]
