@@ -172,3 +172,47 @@ fn compile_native_io_print_tokens() {
     assert!(matches!(&bytecode[2], OpCode::GetExport(name) if name == "print"));
     assert!(matches!(bytecode[3], OpCode::CallNative(1)));
 }
+
+#[test]
+fn compile_string_literals_comments_and_labels() {
+    let source = r#"
+        # string literal preserves spaces
+        "hello raft vm"
+        true JumpIfFalse .done
+        // comments are ignored
+        Jump .done
+        .done
+        Return
+    "#;
+
+    let program = Compiler::compile_with_debug(source).unwrap();
+
+    assert!(matches!(&program.bytecode[0], OpCode::PushString(value) if value == "hello raft vm"));
+    assert!(matches!(
+        program.bytecode[1],
+        OpCode::PushConst(Value::Boolean(true))
+    ));
+    assert!(matches!(program.bytecode[2], OpCode::JumpIfFalse(4)));
+    assert!(matches!(program.bytecode[3], OpCode::Jump(4)));
+    assert!(matches!(program.bytecode[4], OpCode::Return));
+
+    let span = program.debug_info.span_for_instruction(0).unwrap();
+    assert_eq!(span.start.line, 3);
+    assert_eq!(span.start.column, 9);
+}
+
+#[tokio::test]
+async fn run_wraps_runtime_errors_with_source_location() {
+    let err = run("\n42\nJump 99\n")
+        .await
+        .expect_err("expected runtime error");
+
+    match err {
+        VmError::RuntimeError { location, source } => {
+            assert_eq!(location.line, 3);
+            assert_eq!(location.column, 1);
+            assert!(matches!(*source, VmError::ExecutionOutOfBounds));
+        }
+        other => panic!("expected source-mapped runtime error, got {other:?}"),
+    }
+}

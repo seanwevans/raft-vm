@@ -1,5 +1,6 @@
 // src/vm/vm.rs
 
+use crate::compiler::DebugInfo;
 use crate::stdlib;
 use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
@@ -30,14 +31,19 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(
-        bytecode: impl Into<Bytecode>,
+    pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
+        Self::new_with_debug(bytecode, None, supervisor)
+    }
+
+    pub fn new_with_debug(
+        bytecode: Vec<OpCode>,
+        debug_info: Option<DebugInfo>,
         supervisor: Option<Sender<usize>>,
     ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         let bytecode = bytecode.into();
         log::info!("Initializing VM with {} opcodes", bytecode.len());
-        let mut execution = ExecutionContext::with_mailbox(bytecode, rx);
+        let mut execution = ExecutionContext::new_with_debug(bytecode, debug_info);
         let mut heap = Heap::new();
         stdlib::install(&mut heap, &mut execution);
 
@@ -275,7 +281,8 @@ impl VM {
 
     pub fn reset_for_restart(&mut self, start_ip: usize) {
         let bytecode = self.execution.bytecode.clone();
-        self.execution = ExecutionContext::new(bytecode);
+        let debug_info = self.execution.debug_info.clone();
+        self.execution = ExecutionContext::new_with_debug(bytecode, debug_info);
         self.execution.ip = start_ip;
     }
 

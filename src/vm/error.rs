@@ -1,11 +1,16 @@
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
-use crate::compiler::CompilerError;
+use crate::compiler::{CompilerError, SourceLocation};
 use crate::vm::value::Value;
 
 #[derive(Error, Debug, Clone)]
 pub enum VmError {
+    #[error("{source} at {line}:{column}", line = location.line, column = location.column)]
+    RuntimeError {
+        location: SourceLocation,
+        source: Box<VmError>,
+    },
     #[error("{0}")]
     Message(String),
     #[error("Stack underflow")]

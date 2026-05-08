@@ -164,9 +164,9 @@ async fn start_repl() {
 fn repl_input_is_incomplete(source: &str, error: &CompilerError) -> bool {
     match error {
         CompilerError::InvalidAddress(message) => message.starts_with("expected "),
-        CompilerError::InvalidToken(_) | CompilerError::ParseError(_) => {
-            delimiters_are_unclosed(source)
-        }
+        CompilerError::InvalidToken(_)
+        | CompilerError::ParseError(_)
+        | CompilerError::ParseErrorAt { .. } => delimiters_are_unclosed(source),
     }
 }
 
