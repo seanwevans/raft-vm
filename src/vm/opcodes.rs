@@ -710,7 +710,9 @@ impl OpCode {
             OpCode::Mul => binary_op(execution, heap, |a, b| a.checked_mul(b)),
             OpCode::Div => binary_op(execution, heap, |a, b| a.checked_div(b)),
             OpCode::Neg => unary_op(execution, heap, |a| match a {
-                Value::Integer(i) => Ok(Value::Integer(-i)),
+                Value::Integer(i) => i32::checked_neg(i)
+                    .map(Value::Integer)
+                    .ok_or(VmError::IntegerOverflow),
                 Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(VmError::TypeMismatch("Neg")),
             }),
@@ -800,7 +802,9 @@ impl OpCode {
                     if y < 0 {
                         Ok(Value::Float((x as f64).powi(y)))
                     } else {
-                        Ok(Value::Integer(x.pow(y as u32)))
+                        i32::checked_pow(x, y as u32)
+                            .map(Value::Integer)
+                            .ok_or(VmError::IntegerOverflow)
                     }
                 }
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.powf(y))),

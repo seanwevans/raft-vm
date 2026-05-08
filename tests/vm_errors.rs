@@ -15,6 +15,72 @@ async fn division_by_zero_returns_error() {
 }
 
 #[tokio::test]
+async fn integer_add_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MAX)),
+        OpCode::PushConst(Value::Integer(1)),
+        OpCode::Add,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_sub_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MIN)),
+        OpCode::PushConst(Value::Integer(1)),
+        OpCode::Sub,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_mul_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MAX)),
+        OpCode::PushConst(Value::Integer(2)),
+        OpCode::Mul,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_neg_overflow_returns_error() {
+    let code = vec![OpCode::PushConst(Value::Integer(i32::MIN)), OpCode::Neg];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_exp_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MAX)),
+        OpCode::PushConst(Value::Integer(2)),
+        OpCode::Exp,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
 async fn pop_on_empty_stack_returns_error() {
     let code = vec![OpCode::Pop];
     let (mut vm, _tx) = VM::new(code, None);

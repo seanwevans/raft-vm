@@ -19,6 +19,8 @@ pub enum VmError {
     StackUnderflowFor(&'static str),
     #[error("Type mismatch in {0}")]
     TypeMismatch(&'static str),
+    #[error("Integer overflow")]
+    IntegerOverflow,
     #[error("Division by zero")]
     DivisionByZero,
     #[error("Execution out of bounds")]
