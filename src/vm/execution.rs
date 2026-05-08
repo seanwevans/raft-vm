@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
-use crate::vm::opcodes::Bytecode;
+use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::value::Value;
 
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -43,6 +43,7 @@ pub struct ExecutionContext {
     pub call_stack: Vec<usize>,
     pub bytecode: Vec<OpCode>,
     pub debug_info: Option<DebugInfo>,
+    pub mailbox: Receiver<Value>,
 }
 
 impl ExecutionContext {
@@ -52,6 +53,8 @@ impl ExecutionContext {
     }
 
     pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
+        let bytecode = Self::decode_bytecode(bytecode);
+
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
@@ -60,19 +63,22 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             bytecode,
             debug_info: None,
+            mailbox,
         }
     }
 
     pub fn new_with_debug(bytecode: Vec<OpCode>, debug_info: Option<DebugInfo>) -> Self {
-        Self {
-            stack: Vec::new(),
-            locals: HashMap::new(),
-            globals: HashMap::new(),
-            ip: 0,
-            call_stack: Vec::new(),
-            bytecode,
-            debug_info,
-        }
+        let (_tx, rx) = tokio::sync::mpsc::channel(100);
+        let mut execution = Self::with_mailbox(bytecode, rx);
+        execution.debug_info = debug_info;
+        execution
+    }
+
+    fn decode_bytecode(bytecode: impl Into<Bytecode>) -> Vec<OpCode> {
+        let bytecode = bytecode.into();
+        (0..bytecode.len())
+            .map(|ip| bytecode.decode(ip).expect("encoded bytecode should decode"))
+            .collect()
     }
 
     pub fn step(&mut self, heap: &mut Heap) -> Result<ExecutionState, VmError> {
@@ -115,8 +121,7 @@ impl ExecutionContext {
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);
         opcode
-            .execute_with_process(self, heap, mailbox, process)
-            .await
+            .execute_with_process(self, heap, process)
             .map_err(|error| self.with_debug_location(error, instruction_ip))
     }
 
@@ -160,5 +165,9 @@ impl ExecutionContext {
 
     pub fn globals_mut(&mut self) -> &mut HashMap<String, Value> {
         &mut self.globals
+    }
+
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        &mut self.mailbox
     }
 }
