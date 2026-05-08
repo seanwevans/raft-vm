@@ -14,6 +14,7 @@ pub enum Value {
     Null,
 }
 
+#[allow(clippy::should_implement_trait)]
 impl Value {
     pub fn checked_add(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {

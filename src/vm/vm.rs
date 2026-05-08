@@ -1,5 +1,6 @@
 // src/vm/vm.rs
 
+use crate::stdlib;
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject};
@@ -33,10 +34,14 @@ impl VM {
     pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
+        let mut execution = ExecutionContext::new(bytecode);
+        let mut heap = Heap::new();
+        stdlib::install(&mut heap, &mut execution);
+
         (
             VM {
-                execution: ExecutionContext::new(bytecode),
-                heap: Heap::new(),
+                execution,
+                heap,
                 mailbox: rx,
                 self_sender: tx.clone(),
                 process_id: NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed),
@@ -73,6 +78,10 @@ impl VM {
 
     pub fn collect_garbage(&mut self) {
         self.heap.collect_garbage();
+    }
+
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.execution.globals().get(name).copied()
     }
 
     pub fn heap_ref_count(&self, address: usize) -> Option<usize> {

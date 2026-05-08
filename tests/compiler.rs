@@ -138,3 +138,13 @@ async fn run_propagates_compiler_error() {
         VmError::CompilationError(CompilerError::InvalidToken(_))
     ));
 }
+
+#[test]
+fn compile_native_io_print_tokens() {
+    let bytecode = Compiler::compile("42 io.print CallNative 1").unwrap();
+    assert_eq!(bytecode.len(), 4);
+    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Integer(42))));
+    assert!(matches!(&bytecode[1], OpCode::LoadGlobal(name) if name == "io"));
+    assert!(matches!(&bytecode[2], OpCode::GetExport(name) if name == "print"));
+    assert!(matches!(bytecode[3], OpCode::CallNative(1)));
+}

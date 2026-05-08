@@ -101,11 +101,13 @@ fn pop_value(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<Value,
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum OpCode {
     // Variables
     StoreVar(usize),
     LoadVar(usize),
+    LoadGlobal(String),
+    GetExport(String),
 
     // Stack
     PushConst(Value),
@@ -126,6 +128,7 @@ pub enum OpCode {
     Jump(usize),
     JumpIfFalse(usize),
     Call(usize),
+    CallNative(usize),
     Return,
 
     // Actors
@@ -207,6 +210,36 @@ impl OpCode {
                     Err(VmError::VariableNotFound(*index))
                 }
             }
+            OpCode::LoadGlobal(name) => {
+                let value = execution
+                    .globals
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| VmError::GlobalNotFound(name.clone()))?;
+                push_value(execution, heap, value)
+            }
+            OpCode::GetExport(export) => {
+                let module_ref = pop_value(execution, heap)?;
+                let Value::Reference(address) = module_ref else {
+                    return Err(VmError::InvalidReference);
+                };
+
+                let (module_name, value) = match heap.get(address) {
+                    Some(HeapObject::Module { name, exports, .. }) => {
+                        let value = exports.get(export).copied().ok_or_else(|| {
+                            VmError::ExportNotFound {
+                                module: name.clone(),
+                                export: export.clone(),
+                            }
+                        })?;
+                        (name.clone(), value)
+                    }
+                    _ => return Err(VmError::InvalidReference),
+                };
+
+                log::info!("Loaded export {} from module {}", export, module_name);
+                push_value(execution, heap, value)
+            }
             OpCode::Mod => binary_op(execution, heap, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
                     if y == 0 {
@@ -274,6 +307,39 @@ impl OpCode {
                 execution.call_stack.push(execution.ip);
                 execution.ip = *addr;
                 Ok(())
+            }
+
+            OpCode::CallNative(arity) => {
+                let callable = pop_value(execution, heap)?;
+                let Value::Reference(address) = callable else {
+                    return Err(VmError::InvalidReference);
+                };
+
+                let native = match heap.get(address) {
+                    Some(HeapObject::NativeFunction(native, _)) => native,
+                    _ => return Err(VmError::InvalidReference),
+                };
+
+                if native.arity != *arity {
+                    return Err(VmError::Message(format!(
+                        "Native function `{}` expected {} argument(s), got {}",
+                        native.name, native.arity, arity
+                    )));
+                }
+
+                if execution.stack.len() < *arity {
+                    return Err(VmError::StackUnderflowFor("CallNative"));
+                }
+
+                let function = native.function;
+                let mut args = Vec::with_capacity(*arity);
+                for _ in 0..*arity {
+                    args.push(pop_value(execution, heap)?);
+                }
+                args.reverse();
+
+                let result = function(args)?;
+                push_value(execution, heap, result)
             }
             OpCode::Return => {
                 if let Some(return_addr) = execution.call_stack.pop() {

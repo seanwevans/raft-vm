@@ -20,6 +20,7 @@ pub struct ProcessContext {
 pub struct ExecutionContext {
     pub stack: Vec<Value>,
     pub locals: HashMap<usize, Value>,
+    pub globals: HashMap<String, Value>,
     pub ip: usize,
     pub call_stack: Vec<usize>,
     pub bytecode: Vec<OpCode>,
@@ -30,6 +31,7 @@ impl ExecutionContext {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
+            globals: HashMap::new(),
             ip: 0,
             call_stack: Vec::new(),
             bytecode,
@@ -98,5 +100,13 @@ impl ExecutionContext {
 
     pub fn locals_mut(&mut self) -> &mut HashMap<usize, Value> {
         &mut self.locals
+    }
+
+    pub fn globals(&self) -> &HashMap<String, Value> {
+        &self.globals
+    }
+
+    pub fn globals_mut(&mut self) -> &mut HashMap<String, Value> {
+        &mut self.globals
     }
 }

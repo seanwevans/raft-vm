@@ -24,6 +24,9 @@ impl Compiler {
         while let Some(token) = tokens.next() {
             if token == "true" || token == "false" {
                 bytecode.push(OpCode::PushConst(Value::Boolean(token == "true")));
+            } else if token == "io.print" {
+                bytecode.push(OpCode::LoadGlobal("io".to_string()));
+                bytecode.push(OpCode::GetExport("print".to_string()));
             } else if token.contains('.') {
                 let num = token
                     .parse::<f64>()
@@ -54,6 +57,22 @@ impl Compiler {
                             .parse::<usize>()
                             .map_err(|_| CompilerError::InvalidAddress(index_token.to_string()))?;
                         bytecode.push(OpCode::LoadVar(index));
+                    }
+                    "LoadGlobal" => {
+                        let name = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected global name after LoadGlobal".into(),
+                            )
+                        })?;
+                        bytecode.push(OpCode::LoadGlobal(name.to_string()));
+                    }
+                    "GetExport" => {
+                        let name = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected export name after GetExport".into(),
+                            )
+                        })?;
+                        bytecode.push(OpCode::GetExport(name.to_string()));
                     }
                     "Pop" => bytecode.push(OpCode::Pop),
                     "Dup" => bytecode.push(OpCode::Dup),
@@ -93,6 +112,15 @@ impl Compiler {
                             .parse::<usize>()
                             .map_err(|_| CompilerError::InvalidAddress(addr_token.to_string()))?;
                         bytecode.push(OpCode::Call(addr));
+                    }
+                    "CallNative" => {
+                        let arity_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress("expected arity after CallNative".into())
+                        })?;
+                        let arity = arity_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(arity_token.to_string()))?;
+                        bytecode.push(OpCode::CallNative(arity));
                     }
                     "SpawnActor" => {
                         let addr_token = tokens.next().ok_or_else(|| {
