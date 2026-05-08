@@ -5,7 +5,7 @@ use crate::stdlib;
 use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
 use crate::vm::heap::{Heap, HeapObject};
-use crate::vm::opcodes::Bytecode;
+use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::supervision::{
     ChildSpec, ExitReason, ExitSignal, SupervisorState, SupervisorStrategy,
 };
