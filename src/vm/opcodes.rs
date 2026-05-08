@@ -711,7 +711,9 @@ impl OpCode {
             OpCode::Mul => binary_op(execution, heap, |a, b| a.checked_mul(b)),
             OpCode::Div => binary_op(execution, heap, |a, b| a.checked_div(b)),
             OpCode::Neg => unary_op(execution, heap, |a| match a {
-                Value::Integer(i) => Ok(Value::Integer(-i)),
+                Value::Integer(i) => i32::checked_neg(i)
+                    .map(Value::Integer)
+                    .ok_or(VmError::IntegerOverflow),
                 Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(VmError::TypeMismatch("Neg")),
             }),
@@ -801,7 +803,9 @@ impl OpCode {
                     if y < 0 {
                         Ok(Value::Float((x as f64).powi(y)))
                     } else {
-                        Ok(Value::Integer(x.pow(y as u32)))
+                        i32::checked_pow(x, y as u32)
+                            .map(Value::Integer)
+                            .ok_or(VmError::IntegerOverflow)
                     }
                 }
                 (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x.powf(y))),
@@ -899,7 +903,7 @@ impl OpCode {
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
-                if *addr > execution.bytecode.len() {
+                if *addr >= execution.bytecode.len() {
                     log::error!(
                         "SpawnActor target {} out of bounds (bytecode length {})",
                         addr,
@@ -944,6 +948,7 @@ impl OpCode {
                         }
                         Err(TrySendError::Closed(message)) => {
                             push_value(execution, heap, Value::Reference(address))?;
+                            release_value(heap, message)?;
                             Err(VmError::ChannelSend {
                                 error: "channel closed".to_string(),
                                 value: message,
@@ -957,7 +962,7 @@ impl OpCode {
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
-                if *addr > execution.bytecode.len() {
+                if *addr >= execution.bytecode.len() {
                     log::error!(
                         "SpawnSupervisor target {} out of bounds (bytecode length {})",
                         addr,

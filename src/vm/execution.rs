@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
-use crate::vm::opcodes::Bytecode;
+use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::value::Value;
 
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -44,6 +44,7 @@ pub struct ExecutionContext {
     pub call_stack: Vec<usize>,
     pub bytecode: Bytecode,
     pub debug_info: Option<DebugInfo>,
+    pub mailbox: Receiver<Value>,
 }
 
 impl ExecutionContext {
@@ -53,6 +54,8 @@ impl ExecutionContext {
     }
 
     pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
+        let bytecode = Self::decode_bytecode(bytecode);
+
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
@@ -62,6 +65,7 @@ impl ExecutionContext {
             call_stack: Vec::new(),
             bytecode: bytecode.into(),
             debug_info: None,
+            mailbox,
         }
     }
 
