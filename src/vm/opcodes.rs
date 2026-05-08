@@ -898,7 +898,7 @@ impl OpCode {
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
-                if *addr > execution.bytecode.len() {
+                if *addr >= execution.bytecode.len() {
                     log::error!(
                         "SpawnActor target {} out of bounds (bytecode length {})",
                         addr,
@@ -956,7 +956,7 @@ impl OpCode {
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
-                if *addr > execution.bytecode.len() {
+                if *addr >= execution.bytecode.len() {
                     log::error!(
                         "SpawnSupervisor target {} out of bounds (bytecode length {})",
                         addr,
