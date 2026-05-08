@@ -1,3 +1,5 @@
+#![allow(clippy::module_inception)]
+
 // src/vm/mod.rs
 
 pub mod error;

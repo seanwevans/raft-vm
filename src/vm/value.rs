@@ -13,7 +13,7 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn add(self, other: Value) -> Result<Value, VmError> {
+    pub fn checked_add(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
@@ -21,7 +21,7 @@ impl Value {
         }
     }
 
-    pub fn sub(self, other: Value) -> Result<Value, VmError> {
+    pub fn checked_sub(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
@@ -29,7 +29,7 @@ impl Value {
         }
     }
 
-    pub fn mul(self, other: Value) -> Result<Value, VmError> {
+    pub fn checked_mul(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
@@ -37,7 +37,7 @@ impl Value {
         }
     }
 
-    pub fn div(self, other: Value) -> Result<Value, VmError> {
+    pub fn checked_div(self, other: Value) -> Result<Value, VmError> {
         match (self, other) {
             (Value::Integer(a), Value::Integer(b)) => {
                 if b == 0 {

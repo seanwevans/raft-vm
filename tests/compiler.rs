@@ -39,8 +39,9 @@ fn compile_float_tokens() {
     let source = "3.14 2.0 +";
     let bytecode = Compiler::compile(source).unwrap();
     assert_eq!(bytecode.len(), 3);
+    let expected = "3.14".parse::<f64>().unwrap();
     assert!(
-        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.14).abs() < f64::EPSILON)
+        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - expected).abs() < f64::EPSILON)
     );
     assert!(
         matches!(bytecode[1], OpCode::PushConst(Value::Float(f)) if (f - 2.0).abs() < f64::EPSILON)
