@@ -39,9 +39,10 @@ pub struct ExecutionContext {
     pub stack: Vec<Value>,
     pub locals: HashMap<usize, Value>,
     pub globals: HashMap<String, Value>,
+    mailbox: Receiver<Value>,
     pub ip: usize,
     pub call_stack: Vec<usize>,
-    pub bytecode: Vec<OpCode>,
+    pub bytecode: Bytecode,
     pub debug_info: Option<DebugInfo>,
     pub mailbox: Receiver<Value>,
 }
@@ -59,26 +60,35 @@ impl ExecutionContext {
             stack: Vec::new(),
             locals: HashMap::new(),
             globals: HashMap::new(),
+            mailbox,
             ip: 0,
             call_stack: Vec::new(),
-            bytecode,
+            bytecode: bytecode.into(),
             debug_info: None,
             mailbox,
         }
     }
 
-    pub fn new_with_debug(bytecode: Vec<OpCode>, debug_info: Option<DebugInfo>) -> Self {
+    pub fn new_with_debug(bytecode: impl Into<Bytecode>, debug_info: Option<DebugInfo>) -> Self {
         let (_tx, rx) = tokio::sync::mpsc::channel(100);
-        let mut execution = Self::with_mailbox(bytecode, rx);
-        execution.debug_info = debug_info;
-        execution
+        Self::with_mailbox_and_debug(bytecode, rx, debug_info)
     }
 
-    fn decode_bytecode(bytecode: impl Into<Bytecode>) -> Vec<OpCode> {
-        let bytecode = bytecode.into();
-        (0..bytecode.len())
-            .map(|ip| bytecode.decode(ip).expect("encoded bytecode should decode"))
-            .collect()
+    pub fn with_mailbox_and_debug(
+        bytecode: impl Into<Bytecode>,
+        mailbox: Receiver<Value>,
+        debug_info: Option<DebugInfo>,
+    ) -> Self {
+        Self {
+            stack: Vec::new(),
+            locals: HashMap::new(),
+            globals: HashMap::new(),
+            mailbox,
+            ip: 0,
+            call_stack: Vec::new(),
+            bytecode: bytecode.into(),
+            debug_info,
+        }
     }
 
     pub fn step(&mut self, heap: &mut Heap) -> Result<ExecutionState, VmError> {
@@ -116,7 +126,7 @@ impl ExecutionContext {
         }
 
         let instruction_ip = self.ip;
-        let opcode = self.bytecode[self.ip].clone();
+        let opcode = self.bytecode.decode(self.ip)?;
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);

@@ -201,10 +201,8 @@ impl HeapObject {
                     _ => None,
                 })
                 .collect(),
-            HeapObject::String(_, _)
-            | HeapObject::NativeFunction(_, _)
-            | HeapObject::Actor(_, _, _)
-            | HeapObject::Supervisor(_, _, _) => Vec::new(),
+            HeapObject::Actor(vm, _, _) | HeapObject::Supervisor(vm, _, _) => vm.heap_references(),
+            HeapObject::String(_, _) | HeapObject::NativeFunction(_, _) => Vec::new(),
         }
     }
 
@@ -240,5 +238,37 @@ impl HeapObject {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gc_preserves_objects_reachable_from_live_actor_vm_stack() {
+        let mut heap = Heap::new();
+        let string_address = heap.allocate(HeapObject::String("actor string".to_string(), 0));
+        let array_address =
+            heap.allocate(HeapObject::Array(vec![Value::Reference(string_address)], 0));
+
+        let (mut actor_vm, actor_sender) = VM::new(Vec::new(), None);
+        actor_vm.push_stack_value_for_test(Value::Reference(array_address));
+        let actor_address = heap.allocate(HeapObject::Actor(actor_vm, actor_sender, 1));
+
+        heap.collect_garbage();
+
+        assert!(
+            matches!(heap.get(actor_address), Some(HeapObject::Actor(_, _, 1))),
+            "live actor should not be reclaimed"
+        );
+        assert!(
+            matches!(heap.get(array_address), Some(HeapObject::Array(_, 0))),
+            "array referenced by actor VM stack should not be reclaimed"
+        );
+        assert!(
+            matches!(heap.get(string_address), Some(HeapObject::String(value, 0)) if value == "actor string"),
+            "string referenced by actor VM array should not be reclaimed"
+        );
     }
 }
