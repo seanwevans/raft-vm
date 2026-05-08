@@ -1,18 +1,32 @@
 // src/vm/vm.rs
 
+use crate::stdlib;
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::opcodes::OpCode;
+use crate::vm::supervision::{
+    ChildSpec, ExitReason, ExitSignal, SupervisorState, SupervisorStrategy,
+};
 use crate::vm::value::Value;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::mpsc::{self, Receiver, Sender};
+
+static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[derive(Debug)]
 pub struct VM {
     execution: ExecutionContext,
     heap: Heap,
     pub mailbox: Receiver<Value>,
+    self_sender: Sender<Value>,
+    process_id: usize,
+    parent: Option<usize>,
+    restart_ip: usize,
+    links: Vec<Sender<Value>>,
+    trap_exits: bool,
+    supervisor_state: SupervisorState,
     _supervisor: Option<Sender<usize>>,
 }
 
@@ -20,11 +34,22 @@ impl VM {
     pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
+        let mut execution = ExecutionContext::new(bytecode);
+        let mut heap = Heap::new();
+        stdlib::install(&mut heap, &mut execution);
+
         (
             VM {
-                execution: ExecutionContext::new(bytecode),
-                heap: Heap::new(),
+                execution,
+                heap,
                 mailbox: rx,
+                self_sender: tx.clone(),
+                process_id: NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed),
+                parent: None,
+                restart_ip: 0,
+                links: Vec::new(),
+                trap_exits: false,
+                supervisor_state: SupervisorState::default(),
                 _supervisor: supervisor,
             },
             tx,
@@ -55,6 +80,10 @@ impl VM {
         self.heap.collect_garbage();
     }
 
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.execution.globals().get(name).copied()
+    }
+
     pub fn heap_ref_count(&self, address: usize) -> Option<usize> {
         self.heap.get(address).map(|object| match object {
             HeapObject::Array(_, rc)
@@ -70,15 +99,40 @@ impl VM {
         self.execution.ip = ip;
     }
 
+    pub fn current_ip(&self) -> usize {
+        self.execution.ip
+    }
+
+    pub fn restart_ip(&self) -> usize {
+        self.restart_ip
+    }
+
+    pub fn set_restart_ip(&mut self, ip: usize) {
+        self.restart_ip = ip;
+    }
+
     pub async fn run(&mut self) -> Result<(), VmError> {
         if self.execution.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
-            return Err(VmError::NoBytecode);
+            let error = VmError::NoBytecode;
+            self.notify_links(&error).await;
+            return Err(error);
         }
 
         while self.execution.ip < self.execution.bytecode.len() {
-            if let Err(e) = self.execution.step(&mut self.heap, &mut self.mailbox).await {
+            let result = self
+                .execution
+                .step_with_process(
+                    &mut self.heap,
+                    &mut self.mailbox,
+                    self.process_id,
+                    self.self_sender.clone(),
+                    self.trap_exits,
+                )
+                .await;
+            if let Err(e) = result {
                 log::error!("Execution error at ip {}: {}", self.execution.ip, e);
+                self.notify_links(&e).await;
                 return Err(e);
             }
         }
@@ -91,12 +145,81 @@ impl VM {
         &self.execution.stack
     }
 
-    pub fn set_strategy(&mut self, _strategy: usize) {
-        log::info!("Set supervisor strategy to {}", _strategy);
+    pub fn process_id(&self) -> usize {
+        self.process_id
     }
 
-    pub fn restart_child(&mut self, _child_ref: usize) {
-        log::info!("Restarted child at {}", _child_ref);
+    pub fn parent(&self) -> Option<usize> {
+        self.parent
+    }
+
+    pub fn sender(&self) -> Sender<Value> {
+        self.self_sender.clone()
+    }
+
+    pub fn replace_sender(&mut self, sender: Sender<Value>) {
+        self.self_sender = sender;
+    }
+
+    pub fn link(&mut self, sender: Sender<Value>) {
+        self.links.push(sender);
+    }
+
+    pub fn set_parent(&mut self, parent: usize) {
+        self.parent = Some(parent);
+    }
+
+    pub fn set_trap_exits(&mut self, trap_exits: bool) {
+        self.trap_exits = trap_exits;
+    }
+
+    pub fn trap_exits(&self) -> bool {
+        self.trap_exits
+    }
+
+    pub fn set_strategy(&mut self, strategy: usize) {
+        let strategy = SupervisorStrategy::from_usize(strategy);
+        self.supervisor_state.set_strategy(strategy);
+        log::info!("Set supervisor strategy to {:?}", strategy);
+    }
+
+    pub fn strategy(&self) -> SupervisorStrategy {
+        self.supervisor_state.strategy()
+    }
+
+    pub fn supervised_children(&self) -> &[ChildSpec] {
+        self.supervisor_state.children()
+    }
+
+    pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
+        self.supervisor_state.restart_targets(child)
+    }
+
+    pub fn restart_child(&mut self, child_ref: usize) {
+        self.supervisor_state.ensure_child(ChildSpec {
+            reference: child_ref,
+            start_ip: 0,
+        });
+        log::info!("Registered child {} for restart", child_ref);
+    }
+
+    pub fn reset_for_restart(&mut self, start_ip: usize) {
+        let bytecode = self.execution.bytecode.clone();
+        self.execution = ExecutionContext::new(bytecode);
+        self.execution.ip = start_ip;
+    }
+
+    async fn notify_links(&self, error: &VmError) {
+        let signal = Value::ExitSignal(ExitSignal {
+            from: self.process_id,
+            reason: ExitReason::from(error),
+        });
+
+        for link in &self.links {
+            if let Err(err) = link.send(signal).await {
+                log::warn!("Failed to deliver exit signal: {}", err);
+            }
+        }
     }
 }
 

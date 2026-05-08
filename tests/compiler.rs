@@ -40,8 +40,9 @@ fn compile_float_tokens() {
     let source = "3.14 2.0 +";
     let bytecode = Compiler::compile(source).unwrap();
     assert_eq!(bytecode.len(), 3);
+    let expected = "3.14".parse::<f64>().unwrap();
     assert!(
-        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.14).abs() < f64::EPSILON)
+        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - expected).abs() < f64::EPSILON)
     );
     assert!(
         matches!(bytecode[1], OpCode::PushConst(Value::Float(f)) if (f - 2.0).abs() < f64::EPSILON)
@@ -160,4 +161,14 @@ fn compile_heap_value_tokens() {
     assert!(matches!(&bytecode[9], OpCode::ModuleGet(name) if name == "answer"));
     assert!(matches!(&bytecode[10], OpCode::ModuleSet(name) if name == "greeting"));
     assert!(matches!(bytecode[11], OpCode::CallNative(2)));
+}
+
+#[test]
+fn compile_native_io_print_tokens() {
+    let bytecode = Compiler::compile("42 io.print CallNative 1").unwrap();
+    assert_eq!(bytecode.len(), 4);
+    assert!(matches!(bytecode[0], OpCode::PushConst(Value::Integer(42))));
+    assert!(matches!(&bytecode[1], OpCode::LoadGlobal(name) if name == "io"));
+    assert!(matches!(&bytecode[2], OpCode::GetExport(name) if name == "print"));
+    assert!(matches!(bytecode[3], OpCode::CallNative(1)));
 }

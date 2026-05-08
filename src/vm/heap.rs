@@ -8,8 +8,8 @@ use tokio::sync::mpsc::Sender;
 
 #[derive(Debug)]
 pub struct Heap {
-    objects: HashMap<usize, HeapObject>,
-    next_address: usize,
+    objects: Vec<Option<HeapObject>>,
+    free_list: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,21 +42,26 @@ impl Default for Heap {
 impl Heap {
     pub fn new() -> Self {
         Self {
-            objects: HashMap::new(),
-            next_address: 0,
+            objects: Vec::new(),
+            free_list: Vec::new(),
         }
     }
 
     pub fn allocate(&mut self, object: HeapObject) -> usize {
-        let address = self.next_address;
-        self.objects.insert(address, object);
-        log::info!("Allocated object at address {}", address);
-        self.next_address += 1;
-        address
+        if let Some(address) = self.free_list.pop() {
+            self.objects[address] = Some(object);
+            log::info!("Allocated object in reused heap slot {}", address);
+            address
+        } else {
+            let address = self.objects.len();
+            self.objects.push(Some(object));
+            log::info!("Allocated object at new heap slot {}", address);
+            address
+        }
     }
 
     pub fn get(&self, address: usize) -> Option<&HeapObject> {
-        if let Some(obj) = self.objects.get(&address) {
+        if let Some(Some(obj)) = self.objects.get(address) {
             Some(obj)
         } else {
             log::warn!("Attempted to access invalid heap address: {}", address);
@@ -65,28 +70,147 @@ impl Heap {
     }
 
     pub fn get_mut(&mut self, address: usize) -> Option<&mut HeapObject> {
-        self.objects.get_mut(&address)
+        self.objects.get_mut(address).and_then(Option::as_mut)
     }
 
     pub fn collect_garbage(&mut self) {
-        let before = self.objects.len();
-        self.objects.retain(|_, obj| obj.is_alive());
-        let collected = before - self.objects.len();
+        let before = self.live_count();
+        let live = self.trace_live_objects();
+        self.sweep_unmarked(&live);
+        let collected = before - self.live_count();
         if collected > 0 {
             log::info!("Collected {} unreachable heap objects", collected);
         }
+    }
+
+    fn live_count(&self) -> usize {
+        self.objects
+            .iter()
+            .filter(|object| object.is_some())
+            .count()
+    }
+
+    fn trace_live_objects(&self) -> Vec<bool> {
+        let internal_references = self.internal_reference_counts();
+        let mut live = vec![false; self.objects.len()];
+        let mut worklist = Vec::new();
+
+        for (address, object) in self.objects.iter().enumerate() {
+            let Some(object) = object else {
+                continue;
+            };
+
+            let ref_count = object.ref_count();
+            if ref_count > internal_references[address] {
+                live[address] = true;
+                worklist.push(address);
+            }
+        }
+
+        while let Some(address) = worklist.pop() {
+            let Some(object) = self.get(address) else {
+                continue;
+            };
+
+            for referenced_address in object.references() {
+                if referenced_address < live.len()
+                    && self.objects[referenced_address].is_some()
+                    && !live[referenced_address]
+                {
+                    live[referenced_address] = true;
+                    worklist.push(referenced_address);
+                }
+            }
+        }
+
+        live
+    }
+
+    fn internal_reference_counts(&self) -> Vec<usize> {
+        let mut counts = vec![0; self.objects.len()];
+        for object in self.objects.iter().flatten() {
+            for referenced_address in object.references() {
+                if let Some(count) = counts.get_mut(referenced_address) {
+                    *count += 1;
+                }
+            }
+        }
+        counts
+    }
+
+    fn sweep_unmarked(&mut self, live: &[bool]) {
+        let mut references_to_release = Vec::new();
+        let mut addresses_to_free = Vec::new();
+
+        for (address, object) in self.objects.iter().enumerate() {
+            let Some(object) = object else {
+                continue;
+            };
+
+            if !live.get(address).copied().unwrap_or(false) {
+                references_to_release.extend(object.references().into_iter().filter(
+                    |referenced_address| live.get(*referenced_address).copied().unwrap_or(false),
+                ));
+                addresses_to_free.push(address);
+            }
+        }
+
+        for referenced_address in references_to_release {
+            if let Some(object) = self.get_mut(referenced_address) {
+                object.decrement_ref();
+            }
+        }
+
+        for address in addresses_to_free {
+            if self.objects[address].take().is_some() {
+                self.free_list.push(address);
+            }
+        }
+    }
+}
+
+impl Default for Heap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl HeapObject {
     pub fn is_alive(&self) -> bool {
+        self.ref_count() > 0
+    }
+
+    pub fn ref_count(&self) -> usize {
         match self {
             HeapObject::Array(_, rc)
             | HeapObject::String(_, rc)
             | HeapObject::NativeFunction(_, rc)
             | HeapObject::Actor(_, _, rc)
-            | HeapObject::Supervisor(_, _, rc) => *rc > 0,
-            HeapObject::Module { ref_count, .. } => *ref_count > 0,
+            | HeapObject::Supervisor(_, _, rc) => *rc,
+            HeapObject::Module { ref_count, .. } => *ref_count,
+        }
+    }
+
+    pub fn references(&self) -> Vec<usize> {
+        match self {
+            HeapObject::Array(values, _) => values
+                .iter()
+                .filter_map(|value| match value {
+                    Value::Reference(address) => Some(*address),
+                    _ => None,
+                })
+                .collect(),
+            HeapObject::Module { exports, .. } => exports
+                .values()
+                .filter_map(|value| match value {
+                    Value::Reference(address) => Some(*address),
+                    _ => None,
+                })
+                .collect(),
+            HeapObject::String(_, _)
+            | HeapObject::NativeFunction(_, _)
+            | HeapObject::Actor(_, _, _)
+            | HeapObject::Supervisor(_, _, _) => Vec::new(),
         }
     }
 

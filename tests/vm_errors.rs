@@ -173,3 +173,28 @@ async fn top_level_return_gracefully_halts_vm() {
         "expected top-level return to halt gracefully"
     );
 }
+
+#[tokio::test]
+async fn native_io_print_is_available_from_standard_library() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(42)),
+        OpCode::LoadGlobal("io".to_string()),
+        OpCode::GetExport("print".to_string()),
+        OpCode::CallNative(1),
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    vm.run().await.expect("native io.print should run");
+
+    assert_eq!(vm.stack().last().copied(), Some(Value::Null));
+}
+
+#[tokio::test]
+async fn missing_native_global_returns_error() {
+    let code = vec![OpCode::LoadGlobal("missing".to_string())];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("missing global should fail");
+
+    assert!(matches!(err, VmError::GlobalNotFound(name) if name == "missing"));
+}

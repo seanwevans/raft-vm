@@ -238,3 +238,70 @@ async fn add_and_mod_type_mismatch_do_not_leak_references() {
     assert!(heap.get(add_ref).is_none());
     assert!(heap.get(mod_ref).is_none());
 }
+
+#[test]
+fn heap_reuses_freed_slab_slots() {
+    let mut heap = Heap::new();
+
+    let first = heap.allocate(HeapObject::String("first".to_string(), 0));
+    heap.collect_garbage();
+
+    assert!(heap.get(first).is_none());
+
+    let second = heap.allocate(HeapObject::String("second".to_string(), 0));
+    assert_eq!(second, first, "freed slab slot should be reused");
+}
+
+#[test]
+fn garbage_collection_collects_unrooted_reference_cycle() {
+    let mut heap = Heap::new();
+
+    let left = heap.allocate(HeapObject::Array(vec![], 0));
+    let right = heap.allocate(HeapObject::Array(vec![], 0));
+
+    if let Some(HeapObject::Array(values, _)) = heap.get_mut(left) {
+        values.push(Value::Reference(right));
+    }
+    if let Some(HeapObject::Array(values, _)) = heap.get_mut(right) {
+        values.push(Value::Reference(left));
+    }
+    heap.get_mut(left).unwrap().increment_ref();
+    heap.get_mut(right).unwrap().increment_ref();
+
+    assert!(heap.get(left).unwrap().is_alive());
+    assert!(heap.get(right).unwrap().is_alive());
+
+    heap.collect_garbage();
+
+    assert!(heap.get(left).is_none());
+    assert!(heap.get(right).is_none());
+}
+
+#[test]
+fn garbage_collection_preserves_cycles_reachable_from_external_references() {
+    let mut heap = Heap::new();
+
+    let left = heap.allocate(HeapObject::Array(vec![], 0));
+    let right = heap.allocate(HeapObject::Array(vec![], 0));
+
+    if let Some(HeapObject::Array(values, _)) = heap.get_mut(left) {
+        values.push(Value::Reference(right));
+    }
+    if let Some(HeapObject::Array(values, _)) = heap.get_mut(right) {
+        values.push(Value::Reference(left));
+    }
+    heap.get_mut(left).unwrap().increment_ref();
+    heap.get_mut(right).unwrap().increment_ref();
+    heap.get_mut(left).unwrap().increment_ref();
+
+    heap.collect_garbage();
+
+    assert!(heap.get(left).is_some());
+    assert!(heap.get(right).is_some());
+
+    heap.get_mut(left).unwrap().decrement_ref();
+    heap.collect_garbage();
+
+    assert!(heap.get(left).is_none());
+    assert!(heap.get(right).is_none());
+}

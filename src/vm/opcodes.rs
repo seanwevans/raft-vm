@@ -3,9 +3,11 @@
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject, NativeFunction};
+use crate::vm::execution::{ExecutionContext, ProcessContext};
+use crate::vm::supervision::ChildSpec;
 use crate::vm::value::Value;
 use crate::vm::vm::VM;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{self, Receiver};
 
 fn unary_op<F>(execution: &mut ExecutionContext, heap: &mut Heap, f: F) -> Result<(), VmError>
 where
@@ -63,6 +65,33 @@ fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
     }
 
     Ok(())
+}
+
+fn actor_start_ip(heap: &Heap, address: usize) -> Result<usize, VmError> {
+    match heap.get(address) {
+        Some(HeapObject::Actor(vm, _, _)) => Ok(vm.restart_ip()),
+        _ => Err(VmError::InvalidReference),
+    }
+}
+
+fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
+    match heap.get_mut(child.reference) {
+        Some(HeapObject::Actor(vm, sender, _)) => {
+            vm.reset_for_restart(child.start_ip);
+            let (replacement_tx, replacement_rx) = mpsc::channel(100);
+            vm.mailbox = replacement_rx;
+            *sender = replacement_tx.clone();
+            // Keep the VM's self sender aligned with the mailbox sender stored in the heap.
+            vm.replace_sender(replacement_tx);
+            log::info!(
+                "Restarted actor {} at ip {}",
+                child.reference,
+                child.start_ip
+            );
+            Ok(())
+        }
+        _ => Err(VmError::InvalidReference),
+    }
 }
 
 fn push_value(
@@ -322,6 +351,8 @@ pub enum OpCode {
     // Variables
     StoreVar(usize),
     LoadVar(usize),
+    LoadGlobal(String),
+    GetExport(String),
 
     // Stack
     PushConst(Value),
@@ -354,6 +385,7 @@ pub enum OpCode {
     Jump(usize),
     JumpIfFalse(usize),
     Call(usize),
+    CallNative(usize),
     Return,
 
     // Actors
@@ -374,11 +406,22 @@ impl OpCode {
         heap: &mut Heap,
         mailbox: &mut Receiver<Value>,
     ) -> Result<(), VmError> {
+        self.execute_with_process(execution, heap, mailbox, None)
+            .await
+    }
+
+    pub async fn execute_with_process(
+        &self,
+        execution: &mut ExecutionContext,
+        heap: &mut Heap,
+        mailbox: &mut Receiver<Value>,
+        process: Option<ProcessContext>,
+    ) -> Result<(), VmError> {
         match self {
-            OpCode::Add => binary_op(execution, heap, |a, b| a.add(b)),
-            OpCode::Sub => binary_op(execution, heap, |a, b| a.sub(b)),
-            OpCode::Mul => binary_op(execution, heap, |a, b| a.mul(b)),
-            OpCode::Div => binary_op(execution, heap, |a, b| a.div(b)),
+            OpCode::Add => binary_op(execution, heap, |a, b| a.checked_add(b)),
+            OpCode::Sub => binary_op(execution, heap, |a, b| a.checked_sub(b)),
+            OpCode::Mul => binary_op(execution, heap, |a, b| a.checked_mul(b)),
+            OpCode::Div => binary_op(execution, heap, |a, b| a.checked_div(b)),
             OpCode::Neg => unary_op(execution, heap, |a| match a {
                 Value::Integer(i) => Ok(Value::Integer(-i)),
                 Value::Float(f) => Ok(Value::Float(-f)),
@@ -424,6 +467,36 @@ impl OpCode {
                 } else {
                     Err(VmError::VariableNotFound(*index))
                 }
+            }
+            OpCode::LoadGlobal(name) => {
+                let value = execution
+                    .globals
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| VmError::GlobalNotFound(name.clone()))?;
+                push_value(execution, heap, value)
+            }
+            OpCode::GetExport(export) => {
+                let module_ref = pop_value(execution, heap)?;
+                let Value::Reference(address) = module_ref else {
+                    return Err(VmError::InvalidReference);
+                };
+
+                let (module_name, value) = match heap.get(address) {
+                    Some(HeapObject::Module { name, exports, .. }) => {
+                        let value = exports.get(export).copied().ok_or_else(|| {
+                            VmError::ExportNotFound {
+                                module: name.clone(),
+                                export: export.clone(),
+                            }
+                        })?;
+                        (name.clone(), value)
+                    }
+                    _ => return Err(VmError::InvalidReference),
+                };
+
+                log::info!("Loaded export {} from module {}", export, module_name);
+                push_value(execution, heap, value)
             }
             OpCode::Mod => binary_op(execution, heap, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
@@ -508,6 +581,39 @@ impl OpCode {
                 execution.ip = *addr;
                 Ok(())
             }
+
+            OpCode::CallNative(arity) => {
+                let callable = pop_value(execution, heap)?;
+                let Value::Reference(address) = callable else {
+                    return Err(VmError::InvalidReference);
+                };
+
+                let native = match heap.get(address) {
+                    Some(HeapObject::NativeFunction(native, _)) => native,
+                    _ => return Err(VmError::InvalidReference),
+                };
+
+                if native.arity != *arity {
+                    return Err(VmError::Message(format!(
+                        "Native function `{}` expected {} argument(s), got {}",
+                        native.name, native.arity, arity
+                    )));
+                }
+
+                if execution.stack.len() < *arity {
+                    return Err(VmError::StackUnderflowFor("CallNative"));
+                }
+
+                let function = native.function;
+                let mut args = Vec::with_capacity(*arity);
+                for _ in 0..*arity {
+                    args.push(pop_value(execution, heap)?);
+                }
+                args.reverse();
+
+                let result = function(args)?;
+                push_value(execution, heap, result)
+            }
             OpCode::Return => {
                 if let Some(return_addr) = execution.call_stack.pop() {
                     execution.ip = return_addr;
@@ -533,7 +639,7 @@ impl OpCode {
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None);
-                if *addr >= execution.bytecode.len() {
+                if *addr > execution.bytecode.len() {
                     log::error!(
                         "SpawnActor target {} out of bounds (bytecode length {})",
                         addr,
@@ -542,6 +648,14 @@ impl OpCode {
                     return Err(VmError::ExecutionOutOfBounds);
                 }
                 vm.set_ip(*addr);
+                vm.set_restart_ip(*addr);
+                if let Some(process) = &process {
+                    vm.set_parent(process.process_id);
+                    vm.link(process.self_sender.clone());
+                    if process.trap_exits {
+                        vm.set_trap_exits(true);
+                    }
+                }
                 let address = heap.allocate(HeapObject::Actor(vm, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
             }
@@ -583,7 +697,7 @@ impl OpCode {
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
                 let (mut vm, tx) = VM::new(bytecode, None);
-                if *addr >= execution.bytecode.len() {
+                if *addr > execution.bytecode.len() {
                     log::error!(
                         "SpawnSupervisor target {} out of bounds (bytecode length {})",
                         addr,
@@ -592,6 +706,12 @@ impl OpCode {
                     return Err(VmError::ExecutionOutOfBounds);
                 }
                 vm.set_ip(*addr);
+                vm.set_restart_ip(*addr);
+                vm.set_trap_exits(true);
+                if let Some(process) = &process {
+                    vm.set_parent(process.process_id);
+                    vm.link(process.self_sender.clone());
+                }
                 let address = heap.allocate(HeapObject::Supervisor(vm, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
             }
@@ -611,11 +731,21 @@ impl OpCode {
             OpCode::RestartChild(child) => {
                 let sup_ref = pop_value(execution, heap)?;
                 if let Value::Reference(addr) = sup_ref {
-                    if let Some(HeapObject::Supervisor(vm, _, _)) = heap.get_mut(addr) {
-                        vm.restart_child(*child);
+                    let start_ip = actor_start_ip(heap, *child)?;
+                    let targets = if let Some(HeapObject::Supervisor(vm, _, _)) = heap.get_mut(addr)
+                    {
+                        vm.restart_targets(ChildSpec {
+                            reference: *child,
+                            start_ip,
+                        })
                     } else {
                         return Err(VmError::InvalidReference);
+                    };
+
+                    for target in targets {
+                        restart_actor(heap, target)?;
                     }
+
                     push_value(execution, heap, Value::Reference(addr))
                 } else {
                     Err(VmError::InvalidReference)
