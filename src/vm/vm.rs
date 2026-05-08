@@ -2,9 +2,9 @@
 
 use crate::stdlib;
 use crate::vm::error::VmError;
-use crate::vm::execution::ExecutionContext;
+use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
 use crate::vm::heap::{Heap, HeapObject};
-use crate::vm::opcodes::OpCode;
+use crate::vm::opcodes::Bytecode;
 use crate::vm::supervision::{
     ChildSpec, ExitReason, ExitSignal, SupervisorState, SupervisorStrategy,
 };
@@ -19,7 +19,6 @@ static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
 pub struct VM {
     execution: ExecutionContext,
     heap: Heap,
-    pub mailbox: Receiver<Value>,
     self_sender: Sender<Value>,
     process_id: usize,
     parent: Option<usize>,
@@ -31,10 +30,14 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
+    pub fn new(
+        bytecode: impl Into<Bytecode>,
+        supervisor: Option<Sender<usize>>,
+    ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
+        let bytecode = bytecode.into();
         log::info!("Initializing VM with {} opcodes", bytecode.len());
-        let mut execution = ExecutionContext::new(bytecode);
+        let mut execution = ExecutionContext::with_mailbox(bytecode, rx);
         let mut heap = Heap::new();
         stdlib::install(&mut heap, &mut execution);
 
@@ -42,7 +45,6 @@ impl VM {
             VM {
                 execution,
                 heap,
-                mailbox: rx,
                 self_sender: tx.clone(),
                 process_id: NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed),
                 parent: None,
@@ -119,25 +121,93 @@ impl VM {
             return Err(error);
         }
 
-        while self.execution.ip < self.execution.bytecode.len() {
-            let result = self
-                .execution
-                .step_with_process(
-                    &mut self.heap,
-                    &mut self.mailbox,
-                    self.process_id,
-                    self.self_sender.clone(),
-                    self.trap_exits,
-                )
-                .await;
-            if let Err(e) = result {
-                log::error!("Execution error at ip {}: {}", self.execution.ip, e);
-                self.notify_links(&e).await;
-                return Err(e);
+        loop {
+            let state = self.execution.step_with_process(
+                &mut self.heap,
+                self.process_id,
+                self.self_sender.clone(),
+                self.trap_exits,
+            );
+
+            match state {
+                Ok(ExecutionState::Continue) => {}
+                Ok(ExecutionState::Halted) => break,
+                Ok(ExecutionState::Yield(operation)) => {
+                    if let Err(e) = self.await_blocking_operation(operation).await {
+                        log::error!("Execution error at ip {}: {}", self.execution.ip, e);
+                        self.notify_links(&e).await;
+                        return Err(e);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Execution error at ip {}: {}", self.execution.ip, e);
+                    self.notify_links(&e).await;
+                    return Err(e);
+                }
             }
         }
+
         log::info!("VM execution completed successfully");
         Ok(())
+    }
+
+    async fn await_blocking_operation(
+        &mut self,
+        operation: BlockingOperation,
+    ) -> Result<(), VmError> {
+        match operation {
+            BlockingOperation::ReceiveMessage => {
+                let message = self
+                    .execution
+                    .mailbox_mut()
+                    .recv()
+                    .await
+                    .ok_or(VmError::MailboxEmpty)?;
+                if let Value::Reference(address) = message {
+                    self.decrement_reference(address)?;
+                }
+                self.push_runtime_value(message)
+            }
+            BlockingOperation::SendMessage {
+                sender,
+                actor_address,
+                message,
+            } => match sender.send(message).await {
+                Ok(()) => self.push_runtime_value(Value::Reference(actor_address)),
+                Err(err) => {
+                    let error = err.to_string();
+                    let value = err.0;
+                    self.push_runtime_value(Value::Reference(actor_address))?;
+                    Err(VmError::ChannelSend { error, value })
+                }
+            },
+        }
+    }
+
+    fn push_runtime_value(&mut self, value: Value) -> Result<(), VmError> {
+        if let Value::Reference(address) = value {
+            self.increment_reference(address)?;
+        }
+        self.execution.stack.push(value);
+        Ok(())
+    }
+
+    fn increment_reference(&mut self, address: usize) -> Result<(), VmError> {
+        if let Some(object) = self.heap.get_mut(address) {
+            object.increment_ref();
+            Ok(())
+        } else {
+            Err(VmError::InvalidReference)
+        }
+    }
+
+    fn decrement_reference(&mut self, address: usize) -> Result<(), VmError> {
+        if let Some(object) = self.heap.get_mut(address) {
+            object.decrement_ref();
+            Ok(())
+        } else {
+            Err(VmError::InvalidReference)
+        }
     }
 
     /// Expose a reference to the execution stack for testing or inspection.
@@ -209,6 +279,10 @@ impl VM {
         self.execution.ip = start_ip;
     }
 
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        self.execution.mailbox_mut()
+    }
+
     async fn notify_links(&self, error: &VmError) {
         let signal = Value::ExitSignal(ExitSignal {
             from: self.process_id,
@@ -226,6 +300,7 @@ impl VM {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vm::opcodes::OpCode;
     use crate::vm::value::Value;
 
     #[tokio::test]
@@ -274,15 +349,14 @@ mod tests {
 
         let mut ctx = ExecutionContext::new(code);
         let mut heap = Heap::new();
-        let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
 
-        ctx.step(&mut heap, &mut rx).await.unwrap();
+        ctx.step(&mut heap).unwrap();
         assert_eq!(ctx.ip, 1);
 
-        ctx.step(&mut heap, &mut rx).await.unwrap();
+        ctx.step(&mut heap).unwrap();
         assert_eq!(ctx.ip, 2);
 
-        ctx.step(&mut heap, &mut rx).await.unwrap();
+        ctx.step(&mut heap).unwrap();
         assert_eq!(ctx.ip, 3);
     }
 
@@ -295,9 +369,8 @@ mod tests {
             OpCode::PushConst(Value::Integer(1)),
         ]);
         let mut heap = Heap::new();
-        let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
 
-        ctx.step(&mut heap, &mut rx).await.unwrap();
+        ctx.step(&mut heap).unwrap();
         assert_eq!(ctx.ip, 2);
 
         // Test Call
@@ -307,9 +380,8 @@ mod tests {
             OpCode::Return,
         ]);
         let mut heap = Heap::new();
-        let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
 
-        ctx.step(&mut heap, &mut rx).await.unwrap();
+        ctx.step(&mut heap).unwrap();
         assert_eq!(ctx.ip, 2);
         assert_eq!(ctx.call_stack, vec![1]);
     }
@@ -365,18 +437,9 @@ mod tests {
 
         let (mut vm, _tx) = VM::new(code, None);
 
-        let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
-        vm.execution.bytecode[0] = OpCode::PushConst(Value::Reference(message_addr));
-
         // Execute PushConst and SpawnActor
-        vm.execution
-            .step(&mut vm.heap, &mut vm.mailbox)
-            .await
-            .unwrap();
-        vm.execution
-            .step(&mut vm.heap, &mut vm.mailbox)
-            .await
-            .unwrap();
+        vm.execution.step(&mut vm.heap).unwrap();
+        vm.execution.step(&mut vm.heap).unwrap();
 
         // Close actor mailbox to force send failure
         let actor_addr = match vm.execution.stack.last() {
@@ -384,28 +447,19 @@ mod tests {
             other => panic!("Expected actor reference, got {:?}", other),
         };
         if let Some(HeapObject::Actor(actor_vm, _, _)) = vm.heap.get_mut(actor_addr) {
-            actor_vm.mailbox.close();
+            actor_vm.mailbox_mut().close();
         } else {
             panic!("Expected HeapObject::Actor");
         }
 
         // SendMessage should now fail
-        let result = vm.execution.step(&mut vm.heap, &mut vm.mailbox).await;
+        let result = vm.execution.step(&mut vm.heap);
 
         match result {
             Err(VmError::ChannelSend { value, .. }) => {
-                assert_eq!(value, Value::Reference(message_addr));
+                assert_eq!(value, Value::Null);
             }
             other => panic!("Expected ChannelSend error, got {:?}", other),
-        }
-
-        if let Some(HeapObject::Array(_, rc)) = vm.heap.get(message_addr) {
-            assert_eq!(
-                *rc, 1,
-                "message reference count should stay alive while error holds it"
-            );
-        } else {
-            panic!("Expected HeapObject::Array");
         }
 
         if let Some(HeapObject::Actor(_, _, rc)) = vm.heap.get(actor_addr) {

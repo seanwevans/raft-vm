@@ -1,7 +1,6 @@
 use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject};
 use raft::vm::{ExitReason, OpCode, SupervisorStrategy, Value, VmError, VM};
-use tokio::sync::mpsc::channel;
 
 #[tokio::test]
 async fn linked_parent_receives_division_by_zero_exit_signal() {
@@ -20,7 +19,7 @@ async fn linked_parent_receives_division_by_zero_exit_signal() {
     assert!(matches!(err, VmError::DivisionByZero));
 
     let signal = parent
-        .mailbox
+        .mailbox_mut()
         .recv()
         .await
         .expect("linked parent should receive an exit signal");
@@ -50,7 +49,7 @@ async fn linked_parent_receives_type_mismatch_exit_signal() {
     assert!(matches!(err, VmError::TypeMismatch("Add")));
 
     let signal = parent
-        .mailbox
+        .mailbox_mut()
         .recv()
         .await
         .expect("linked parent should receive an exit signal");
@@ -67,11 +66,8 @@ async fn linked_parent_receives_type_mismatch_exit_signal() {
 async fn supervisor_restart_child_uses_one_for_all_strategy() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    let (_tx, mut mailbox) = channel(1);
-
     OpCode::SpawnSupervisor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("spawn supervisor should succeed");
     let supervisor_addr = match execution.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
@@ -79,8 +75,7 @@ async fn supervisor_restart_child_uses_one_for_all_strategy() {
     };
 
     OpCode::SetStrategy(1)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("set strategy should succeed");
     match heap.get(supervisor_addr).expect("supervisor should exist") {
         HeapObject::Supervisor(vm, _, _) => {
@@ -90,16 +85,14 @@ async fn supervisor_restart_child_uses_one_for_all_strategy() {
     }
 
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("spawn first actor should succeed");
     let first_child = match execution.stack.pop() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("expected first actor reference, got {other:?}"),
     };
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("spawn second actor should succeed");
     let second_child = match execution.stack.pop() {
         Some(Value::Reference(addr)) => addr,
@@ -122,13 +115,11 @@ async fn supervisor_restart_child_uses_one_for_all_strategy() {
     // should reset both tracked children to their start instruction pointers.
     execution.stack.push(Value::Reference(supervisor_addr));
     OpCode::RestartChild(second_child)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("registering second child should succeed");
     execution.stack.push(Value::Reference(supervisor_addr));
     OpCode::RestartChild(first_child)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("one-for-all restart should succeed");
 
     match heap.get(first_child).expect("first child should exist") {
