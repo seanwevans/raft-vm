@@ -25,6 +25,23 @@ impl Actor {
         self.sender.clone()
     }
 
+    /// Obtain this actor's runtime process id.
+    pub fn process_id(&self) -> usize {
+        self.vm.process_id()
+    }
+
+    /// Link this actor to another actor so this actor receives exit signals
+    /// when the other actor terminates with an error.
+    pub fn link_to(&mut self, other: &mut Actor) {
+        other.vm.link(self.sender());
+    }
+
+    /// Monitor another actor. Monitoring is one-way and currently delivers the
+    /// same mailbox exit signal shape as links.
+    pub fn monitor(&mut self, other: &mut Actor) {
+        self.link_to(other);
+    }
+
     /// Send a message to the actor's mailbox.
     pub async fn send(&self, msg: Value) -> Result<(), VmError> {
         self.sender.send(msg).await.map_err(|e| {
