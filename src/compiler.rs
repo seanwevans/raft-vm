@@ -114,14 +114,6 @@ impl Compiler {
                         })?;
                         bytecode.push(OpCode::ModuleSet(name.to_string()));
                     }
-                    "CallNative" => {
-                        let arity_token = tokens.next().ok_or_else(|| {
-                            CompilerError::InvalidAddress("expected arity after CallNative".into())
-                        })?;
-                        let arity = arity_token
-                            .parse::<usize>()
-                            .map_err(|_| CompilerError::InvalidAddress(arity_token.to_string()))?;
-                        bytecode.push(OpCode::CallNative(arity));
                     "LoadGlobal" => {
                         let name = tokens.next().ok_or_else(|| {
                             CompilerError::InvalidAddress(

@@ -45,6 +45,7 @@ fn display_value(value: &Value) -> String {
         Value::Float(value) => value.to_string(),
         Value::Boolean(value) => value.to_string(),
         Value::Reference(address) => format!("<ref:{address}>"),
+        Value::ExitSignal(signal) => format!("<exit:{}:{:?}>", signal.from, signal.reason),
         Value::Null => "null".to_string(),
     }
 }

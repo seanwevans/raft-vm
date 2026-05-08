@@ -4,10 +4,27 @@ use std::collections::HashMap;
 
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
-use crate::vm::opcodes::OpCode;
+use crate::vm::opcodes::Bytecode;
 use crate::vm::value::Value;
 
 use tokio::sync::mpsc::{Receiver, Sender};
+
+#[derive(Debug)]
+pub enum BlockingOperation {
+    ReceiveMessage,
+    SendMessage {
+        sender: Sender<Value>,
+        actor_address: usize,
+        message: Value,
+    },
+}
+
+#[derive(Debug)]
+pub enum ExecutionState {
+    Continue,
+    Yield(BlockingOperation),
+    Halted,
+}
 
 #[derive(Debug, Clone)]
 pub struct ProcessContext {
@@ -23,67 +40,71 @@ pub struct ExecutionContext {
     pub globals: HashMap<String, Value>,
     pub ip: usize,
     pub call_stack: Vec<usize>,
-    pub bytecode: Vec<OpCode>,
+    pub bytecode: Bytecode,
+    mailbox: Receiver<Value>,
 }
 
 impl ExecutionContext {
-    pub fn new(bytecode: Vec<OpCode>) -> Self {
+    pub fn new(bytecode: impl Into<Bytecode>) -> Self {
+        let (_tx, rx) = tokio::sync::mpsc::channel(100);
+        Self::with_mailbox(bytecode, rx)
+    }
+
+    pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
             globals: HashMap::new(),
             ip: 0,
             call_stack: Vec::new(),
-            bytecode,
+            bytecode: bytecode.into(),
+            mailbox,
         }
     }
 
-    pub async fn step(
-        &mut self,
-        heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
-    ) -> Result<(), VmError> {
-        self.step_inner(heap, mailbox, None).await
+    pub fn step(&mut self, heap: &mut Heap) -> Result<ExecutionState, VmError> {
+        self.step_inner(heap, None)
     }
 
-    pub async fn step_with_process(
+    pub fn step_with_process(
         &mut self,
         heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
         process_id: usize,
         self_sender: Sender<Value>,
         trap_exits: bool,
-    ) -> Result<(), VmError> {
+    ) -> Result<ExecutionState, VmError> {
         self.step_inner(
             heap,
-            mailbox,
             Some(ProcessContext {
                 process_id,
                 self_sender,
                 trap_exits,
             }),
         )
-        .await
     }
 
-    async fn step_inner(
+    fn step_inner(
         &mut self,
         heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
         process: Option<ProcessContext>,
-    ) -> Result<(), VmError> {
-        if self.ip >= self.bytecode.len() {
+    ) -> Result<ExecutionState, VmError> {
+        if self.ip == self.bytecode.len() {
+            return Ok(ExecutionState::Halted);
+        }
+        if self.ip > self.bytecode.len() {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
             return Err(VmError::ExecutionOutOfBounds);
         }
 
-        let opcode = self.bytecode[self.ip];
+        let opcode = self.bytecode.decode(self.ip)?;
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);
-        opcode
-            .execute_with_process(self, heap, mailbox, process)
-            .await
+        opcode.execute_with_process(self, heap, process)
+    }
+
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        &mut self.mailbox
     }
 
     pub fn ip(&self) -> usize {

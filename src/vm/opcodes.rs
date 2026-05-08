@@ -1,13 +1,12 @@
 // src/vm/opcodes.rs
 
 use crate::vm::error::VmError;
-use crate::vm::execution::ExecutionContext;
+use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState, ProcessContext};
 use crate::vm::heap::{Heap, HeapObject, NativeFunction};
-use crate::vm::execution::{ExecutionContext, ProcessContext};
 use crate::vm::supervision::ChildSpec;
 use crate::vm::value::Value;
 use crate::vm::vm::VM;
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc::{self, error::TrySendError};
 
 fn unary_op<F>(execution: &mut ExecutionContext, heap: &mut Heap, f: F) -> Result<(), VmError>
 where
@@ -79,7 +78,7 @@ fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
         Some(HeapObject::Actor(vm, sender, _)) => {
             vm.reset_for_restart(child.start_ip);
             let (replacement_tx, replacement_rx) = mpsc::channel(100);
-            vm.mailbox = replacement_rx;
+            *vm.mailbox_mut() = replacement_rx;
             *sender = replacement_tx.clone();
             // Keep the VM's self sender aligned with the mailbox sender stored in the heap.
             vm.replace_sender(replacement_tx);
@@ -320,12 +319,6 @@ fn call_native(
         return Err(VmError::StackUnderflowFor("CallNative"));
     }
 
-    let mut args = Vec::with_capacity(arity);
-    for _ in 0..arity {
-        args.push(pop_value(execution, heap)?);
-    }
-    args.reverse();
-
     let function_ref = pop_value(execution, heap)?;
     let function = match function_ref {
         Value::Reference(address) => match heap.get(address) {
@@ -342,9 +335,286 @@ fn call_native(
         });
     }
 
+    let mut args = Vec::with_capacity(arity);
+    for _ in 0..arity {
+        args.push(pop_value(execution, heap)?);
+    }
+    args.reverse();
+
     let result = (function.function)(args)?;
     push_value(execution, heap, result)
 }
+
+#[derive(Debug, Clone)]
+pub struct Bytecode {
+    instructions: Vec<u8>,
+    constants: Vec<BytecodeConstant>,
+    offsets: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub enum BytecodeConstant {
+    Value(Value),
+    String(String),
+    Strings(Vec<String>),
+    NativeFunction(NativeFunction),
+}
+
+impl Bytecode {
+    pub fn new(opcodes: Vec<OpCode>) -> Self {
+        let mut bytecode = Self {
+            instructions: Vec::new(),
+            constants: Vec::new(),
+            offsets: Vec::with_capacity(opcodes.len()),
+        };
+        for opcode in opcodes {
+            bytecode.encode(opcode);
+        }
+        bytecode
+    }
+
+    pub fn instructions(&self) -> &[u8] {
+        &self.instructions
+    }
+
+    pub fn constants(&self) -> &[BytecodeConstant] {
+        &self.constants
+    }
+
+    pub fn offsets(&self) -> &[usize] {
+        &self.offsets
+    }
+
+    pub fn len(&self) -> usize {
+        self.offsets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.offsets.is_empty()
+    }
+
+    pub fn decode(&self, ip: usize) -> Result<OpCode, VmError> {
+        let offset = *self.offsets.get(ip).ok_or(VmError::ExecutionOutOfBounds)?;
+        let opcode = *self
+            .instructions
+            .get(offset)
+            .ok_or(VmError::ExecutionOutOfBounds)?;
+        let operand = || self.read_u32(offset + 1).map(|value| value as usize);
+        match opcode {
+            OP_STORE_VAR => Ok(OpCode::StoreVar(operand()?)),
+            OP_LOAD_VAR => Ok(OpCode::LoadVar(operand()?)),
+            OP_LOAD_GLOBAL => Ok(OpCode::LoadGlobal(
+                self.string_constant(operand()?)?.to_string(),
+            )),
+            OP_GET_EXPORT => Ok(OpCode::GetExport(
+                self.string_constant(operand()?)?.to_string(),
+            )),
+            OP_PUSH_CONST => Ok(OpCode::PushConst(self.value_constant(operand()?)?)),
+            OP_MAKE_ARRAY => Ok(OpCode::MakeArray(operand()?)),
+            OP_POP => Ok(OpCode::Pop),
+            OP_DUP => Ok(OpCode::Dup),
+            OP_SWAP => Ok(OpCode::Swap),
+            OP_ADD => Ok(OpCode::Add),
+            OP_SUB => Ok(OpCode::Sub),
+            OP_MUL => Ok(OpCode::Mul),
+            OP_DIV => Ok(OpCode::Div),
+            OP_MOD => Ok(OpCode::Mod),
+            OP_NEG => Ok(OpCode::Neg),
+            OP_EXP => Ok(OpCode::Exp),
+            OP_ARRAY_GET => Ok(OpCode::ArrayGet),
+            OP_ARRAY_SET => Ok(OpCode::ArraySet),
+            OP_MAKE_STRING => Ok(OpCode::MakeString(
+                self.string_constant(operand()?)?.to_string(),
+            )),
+            OP_STRING_CONCAT => Ok(OpCode::StringConcat),
+            OP_MAKE_MODULE => Ok(OpCode::MakeModule(
+                self.strings_constant(operand()?)?.to_vec(),
+            )),
+            OP_MODULE_GET => Ok(OpCode::ModuleGet(
+                self.string_constant(operand()?)?.to_string(),
+            )),
+            OP_MODULE_SET => Ok(OpCode::ModuleSet(
+                self.string_constant(operand()?)?.to_string(),
+            )),
+            OP_MAKE_NATIVE_FUNCTION => Ok(OpCode::MakeNativeFunction(
+                self.native_constant(operand()?)?.clone(),
+            )),
+            OP_CALL_NATIVE => Ok(OpCode::CallNative(operand()?)),
+            OP_JUMP => Ok(OpCode::Jump(operand()?)),
+            OP_JUMP_IF_FALSE => Ok(OpCode::JumpIfFalse(operand()?)),
+            OP_CALL => Ok(OpCode::Call(operand()?)),
+            OP_RETURN => Ok(OpCode::Return),
+            OP_SPAWN_ACTOR => Ok(OpCode::SpawnActor(operand()?)),
+            OP_SEND_MESSAGE => Ok(OpCode::SendMessage),
+            OP_RECEIVE_MESSAGE => Ok(OpCode::ReceiveMessage),
+            OP_SPAWN_SUPERVISOR => Ok(OpCode::SpawnSupervisor(operand()?)),
+            OP_SET_STRATEGY => Ok(OpCode::SetStrategy(operand()?)),
+            OP_RESTART_CHILD => Ok(OpCode::RestartChild(operand()?)),
+            _ => Err(VmError::ExecutionOutOfBounds),
+        }
+    }
+
+    fn encode(&mut self, opcode: OpCode) {
+        self.offsets.push(self.instructions.len());
+        match opcode {
+            OpCode::StoreVar(value) => self.emit_operand(OP_STORE_VAR, value),
+            OpCode::LoadVar(value) => self.emit_operand(OP_LOAD_VAR, value),
+            OpCode::LoadGlobal(value) => {
+                let index = self.push_constant(BytecodeConstant::String(value));
+                self.emit_operand(OP_LOAD_GLOBAL, index);
+            }
+            OpCode::GetExport(value) => {
+                let index = self.push_constant(BytecodeConstant::String(value));
+                self.emit_operand(OP_GET_EXPORT, index);
+            }
+            OpCode::PushConst(value) => {
+                let index = self.push_constant(BytecodeConstant::Value(value));
+                self.emit_operand(OP_PUSH_CONST, index);
+            }
+            OpCode::MakeArray(value) => self.emit_operand(OP_MAKE_ARRAY, value),
+            OpCode::Pop => self.emit(OP_POP),
+            OpCode::Dup => self.emit(OP_DUP),
+            OpCode::Swap => self.emit(OP_SWAP),
+            OpCode::Add => self.emit(OP_ADD),
+            OpCode::Sub => self.emit(OP_SUB),
+            OpCode::Mul => self.emit(OP_MUL),
+            OpCode::Div => self.emit(OP_DIV),
+            OpCode::Mod => self.emit(OP_MOD),
+            OpCode::Neg => self.emit(OP_NEG),
+            OpCode::Exp => self.emit(OP_EXP),
+            OpCode::ArrayGet => self.emit(OP_ARRAY_GET),
+            OpCode::ArraySet => self.emit(OP_ARRAY_SET),
+            OpCode::MakeString(value) => {
+                let index = self.push_constant(BytecodeConstant::String(value));
+                self.emit_operand(OP_MAKE_STRING, index);
+            }
+            OpCode::StringConcat => self.emit(OP_STRING_CONCAT),
+            OpCode::MakeModule(value) => {
+                let index = self.push_constant(BytecodeConstant::Strings(value));
+                self.emit_operand(OP_MAKE_MODULE, index);
+            }
+            OpCode::ModuleGet(value) => {
+                let index = self.push_constant(BytecodeConstant::String(value));
+                self.emit_operand(OP_MODULE_GET, index);
+            }
+            OpCode::ModuleSet(value) => {
+                let index = self.push_constant(BytecodeConstant::String(value));
+                self.emit_operand(OP_MODULE_SET, index);
+            }
+            OpCode::MakeNativeFunction(value) => {
+                let index = self.push_constant(BytecodeConstant::NativeFunction(value));
+                self.emit_operand(OP_MAKE_NATIVE_FUNCTION, index);
+            }
+            OpCode::CallNative(value) => self.emit_operand(OP_CALL_NATIVE, value),
+            OpCode::Jump(value) => self.emit_operand(OP_JUMP, value),
+            OpCode::JumpIfFalse(value) => self.emit_operand(OP_JUMP_IF_FALSE, value),
+            OpCode::Call(value) => self.emit_operand(OP_CALL, value),
+            OpCode::Return => self.emit(OP_RETURN),
+            OpCode::SpawnActor(value) => self.emit_operand(OP_SPAWN_ACTOR, value),
+            OpCode::SendMessage => self.emit(OP_SEND_MESSAGE),
+            OpCode::ReceiveMessage => self.emit(OP_RECEIVE_MESSAGE),
+            OpCode::SpawnSupervisor(value) => self.emit_operand(OP_SPAWN_SUPERVISOR, value),
+            OpCode::SetStrategy(value) => self.emit_operand(OP_SET_STRATEGY, value),
+            OpCode::RestartChild(value) => self.emit_operand(OP_RESTART_CHILD, value),
+        }
+    }
+
+    fn emit(&mut self, opcode: u8) {
+        self.instructions.push(opcode);
+    }
+
+    fn emit_operand(&mut self, opcode: u8, operand: usize) {
+        self.instructions.push(opcode);
+        self.instructions
+            .extend_from_slice(&(operand as u32).to_le_bytes());
+    }
+
+    fn push_constant(&mut self, constant: BytecodeConstant) -> usize {
+        let index = self.constants.len();
+        self.constants.push(constant);
+        index
+    }
+
+    fn read_u32(&self, offset: usize) -> Result<u32, VmError> {
+        let bytes: [u8; 4] = self
+            .instructions
+            .get(offset..offset + 4)
+            .ok_or(VmError::ExecutionOutOfBounds)?
+            .try_into()
+            .map_err(|_| VmError::ExecutionOutOfBounds)?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn value_constant(&self, index: usize) -> Result<Value, VmError> {
+        match self.constants.get(index) {
+            Some(BytecodeConstant::Value(value)) => Ok(*value),
+            _ => Err(VmError::ExecutionOutOfBounds),
+        }
+    }
+
+    fn string_constant(&self, index: usize) -> Result<&str, VmError> {
+        match self.constants.get(index) {
+            Some(BytecodeConstant::String(value)) => Ok(value),
+            _ => Err(VmError::ExecutionOutOfBounds),
+        }
+    }
+
+    fn strings_constant(&self, index: usize) -> Result<&[String], VmError> {
+        match self.constants.get(index) {
+            Some(BytecodeConstant::Strings(value)) => Ok(value),
+            _ => Err(VmError::ExecutionOutOfBounds),
+        }
+    }
+
+    fn native_constant(&self, index: usize) -> Result<&NativeFunction, VmError> {
+        match self.constants.get(index) {
+            Some(BytecodeConstant::NativeFunction(value)) => Ok(value),
+            _ => Err(VmError::ExecutionOutOfBounds),
+        }
+    }
+}
+
+impl From<Vec<OpCode>> for Bytecode {
+    fn from(value: Vec<OpCode>) -> Self {
+        Bytecode::new(value)
+    }
+}
+
+const OP_STORE_VAR: u8 = 0x01;
+const OP_LOAD_VAR: u8 = 0x02;
+const OP_LOAD_GLOBAL: u8 = 0x03;
+const OP_GET_EXPORT: u8 = 0x04;
+const OP_PUSH_CONST: u8 = 0x05;
+const OP_MAKE_ARRAY: u8 = 0x06;
+const OP_POP: u8 = 0x07;
+const OP_DUP: u8 = 0x08;
+const OP_SWAP: u8 = 0x09;
+const OP_ADD: u8 = 0x10;
+const OP_SUB: u8 = 0x11;
+const OP_MUL: u8 = 0x12;
+const OP_DIV: u8 = 0x13;
+const OP_MOD: u8 = 0x14;
+const OP_NEG: u8 = 0x15;
+const OP_EXP: u8 = 0x16;
+const OP_ARRAY_GET: u8 = 0x20;
+const OP_ARRAY_SET: u8 = 0x21;
+const OP_MAKE_STRING: u8 = 0x22;
+const OP_STRING_CONCAT: u8 = 0x23;
+const OP_MAKE_MODULE: u8 = 0x24;
+const OP_MODULE_GET: u8 = 0x25;
+const OP_MODULE_SET: u8 = 0x26;
+const OP_MAKE_NATIVE_FUNCTION: u8 = 0x27;
+const OP_CALL_NATIVE: u8 = 0x28;
+const OP_JUMP: u8 = 0x30;
+const OP_JUMP_IF_FALSE: u8 = 0x31;
+const OP_CALL: u8 = 0x32;
+const OP_RETURN: u8 = 0x33;
+const OP_SPAWN_ACTOR: u8 = 0x40;
+const OP_SEND_MESSAGE: u8 = 0x41;
+const OP_RECEIVE_MESSAGE: u8 = 0x42;
+const OP_SPAWN_SUPERVISOR: u8 = 0x50;
+const OP_SET_STRATEGY: u8 = 0x51;
+const OP_RESTART_CHILD: u8 = 0x52;
 
 #[derive(Debug, Clone)]
 pub enum OpCode {
@@ -385,7 +655,6 @@ pub enum OpCode {
     Jump(usize),
     JumpIfFalse(usize),
     Call(usize),
-    CallNative(usize),
     Return,
 
     // Actors
@@ -400,24 +669,21 @@ pub enum OpCode {
 }
 
 impl OpCode {
-    pub async fn execute(
+    pub fn execute(
         &self,
         execution: &mut ExecutionContext,
         heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
-    ) -> Result<(), VmError> {
-        self.execute_with_process(execution, heap, mailbox, None)
-            .await
+    ) -> Result<ExecutionState, VmError> {
+        self.execute_with_process(execution, heap, None)
     }
 
-    pub async fn execute_with_process(
+    pub fn execute_with_process(
         &self,
         execution: &mut ExecutionContext,
         heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
         process: Option<ProcessContext>,
-    ) -> Result<(), VmError> {
-        match self {
+    ) -> Result<ExecutionState, VmError> {
+        let result: Result<(), VmError> = match self {
             OpCode::Add => binary_op(execution, heap, |a, b| a.checked_add(b)),
             OpCode::Sub => binary_op(execution, heap, |a, b| a.checked_sub(b)),
             OpCode::Mul => binary_op(execution, heap, |a, b| a.checked_mul(b)),
@@ -582,38 +848,6 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::CallNative(arity) => {
-                let callable = pop_value(execution, heap)?;
-                let Value::Reference(address) = callable else {
-                    return Err(VmError::InvalidReference);
-                };
-
-                let native = match heap.get(address) {
-                    Some(HeapObject::NativeFunction(native, _)) => native,
-                    _ => return Err(VmError::InvalidReference),
-                };
-
-                if native.arity != *arity {
-                    return Err(VmError::Message(format!(
-                        "Native function `{}` expected {} argument(s), got {}",
-                        native.name, native.arity, arity
-                    )));
-                }
-
-                if execution.stack.len() < *arity {
-                    return Err(VmError::StackUnderflowFor("CallNative"));
-                }
-
-                let function = native.function;
-                let mut args = Vec::with_capacity(*arity);
-                for _ in 0..*arity {
-                    args.push(pop_value(execution, heap)?);
-                }
-                args.reverse();
-
-                let result = function(args)?;
-                push_value(execution, heap, result)
-            }
             OpCode::Return => {
                 if let Some(return_addr) = execution.call_stack.pop() {
                     execution.ip = return_addr;
@@ -623,18 +857,22 @@ impl OpCode {
                     Ok(())
                 }
             }
-            OpCode::ReceiveMessage => {
-                if let Some(message) = mailbox.recv().await {
+            OpCode::ReceiveMessage => match execution.mailbox_mut().try_recv() {
+                Ok(message) => {
                     log::info!("Received message: {:?}", message);
                     if let Value::Reference(address) = message {
                         decrement_reference(heap, address)?;
                     }
                     push_value(execution, heap, message)
-                } else {
-                    log::warn!("Mailbox is empty or closed");
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    return Ok(ExecutionState::Yield(BlockingOperation::ReceiveMessage));
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    log::warn!("Mailbox is closed");
                     Err(VmError::MailboxEmpty)
                 }
-            }
+            },
 
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
@@ -673,20 +911,20 @@ impl OpCode {
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    match sender.send(message).await {
+                    match sender.try_send(message) {
                         Ok(()) => push_value(execution, heap, Value::Reference(address)),
-                        Err(err) => {
-                            let error = err.to_string();
-                            let failed_message = err.0;
+                        Err(TrySendError::Full(message)) => {
+                            return Ok(ExecutionState::Yield(BlockingOperation::SendMessage {
+                                sender,
+                                actor_address: address,
+                                message,
+                            }));
+                        }
+                        Err(TrySendError::Closed(message)) => {
                             push_value(execution, heap, Value::Reference(address))?;
-                            // Keep the recovered message alive so that callers can
-                            // safely inspect or resend it from the returned error.
-                            // The send attempt already incremented the reference
-                            // count to transfer ownership to the channel, so we
-                            // intentionally skip the corresponding decrement here.
                             Err(VmError::ChannelSend {
-                                error,
-                                value: failed_message,
+                                error: "channel closed".to_string(),
+                                value: message,
                             })
                         }
                     }
@@ -751,14 +989,15 @@ impl OpCode {
                     Err(VmError::InvalidReference)
                 }
             }
-        }
+        };
+
+        result.map(|()| ExecutionState::Continue)
     }
 }
 
 #[cfg(test)]
 mod heap_opcode_tests {
     use super::*;
-    use tokio::sync::mpsc::channel;
 
     fn add_native(args: Vec<Value>) -> Result<Value, VmError> {
         match args.as_slice() {
@@ -771,17 +1010,13 @@ mod heap_opcode_tests {
     async fn make_array_get_and_set_values() {
         let mut execution = ExecutionContext::new(vec![OpCode::Return]);
         let mut heap = Heap::new();
-        let (_tx, mut mailbox) = channel(1);
-
         for value in [Value::Integer(10), Value::Integer(20), Value::Integer(30)] {
             OpCode::PushConst(value)
-                .execute(&mut execution, &mut heap, &mut mailbox)
-                .await
+                .execute(&mut execution, &mut heap)
                 .unwrap();
         }
         OpCode::MakeArray(3)
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
 
         let array_addr = match execution.stack.last().copied() {
@@ -789,32 +1024,20 @@ mod heap_opcode_tests {
             other => panic!("expected array reference, got {other:?}"),
         };
 
-        OpCode::Dup
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
+        OpCode::Dup.execute(&mut execution, &mut heap).unwrap();
         OpCode::PushConst(Value::Integer(1))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
-        OpCode::ArrayGet
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
+        OpCode::ArrayGet.execute(&mut execution, &mut heap).unwrap();
         assert_eq!(execution.stack.pop(), Some(Value::Integer(20)));
 
         OpCode::PushConst(Value::Integer(2))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         OpCode::PushConst(Value::Integer(99))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
-        OpCode::ArraySet
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
+        OpCode::ArraySet.execute(&mut execution, &mut heap).unwrap();
 
         match heap.get(array_addr) {
             Some(HeapObject::Array(elements, rc)) => {
@@ -832,19 +1055,14 @@ mod heap_opcode_tests {
     async fn string_concat_allocates_combined_string() {
         let mut execution = ExecutionContext::new(vec![OpCode::Return]);
         let mut heap = Heap::new();
-        let (_tx, mut mailbox) = channel(1);
-
         OpCode::MakeString("raft".to_string())
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         OpCode::MakeString(" vm".to_string())
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         OpCode::StringConcat
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
 
         let address = match execution.stack.last().copied() {
@@ -864,63 +1082,45 @@ mod heap_opcode_tests {
     async fn module_get_set_and_native_calls_work() {
         let mut execution = ExecutionContext::new(vec![OpCode::Return]);
         let mut heap = Heap::new();
-        let (_tx, mut mailbox) = channel(1);
-
         OpCode::PushConst(Value::Integer(7))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         OpCode::MakeModule(vec!["answer".to_string()])
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
-        OpCode::Dup
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
+        OpCode::Dup.execute(&mut execution, &mut heap).unwrap();
         OpCode::ModuleGet("answer".to_string())
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         assert_eq!(execution.stack.pop(), Some(Value::Integer(7)));
 
         OpCode::PushConst(Value::Integer(8))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         OpCode::ModuleSet("answer".to_string())
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
-        OpCode::Dup
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
+        OpCode::Dup.execute(&mut execution, &mut heap).unwrap();
         OpCode::ModuleGet("answer".to_string())
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         assert_eq!(execution.stack.pop(), Some(Value::Integer(8)));
 
+        OpCode::PushConst(Value::Integer(2))
+            .execute(&mut execution, &mut heap)
+            .unwrap();
+        OpCode::PushConst(Value::Integer(3))
+            .execute(&mut execution, &mut heap)
+            .unwrap();
         OpCode::MakeNativeFunction(NativeFunction {
             name: "add".to_string(),
             arity: 2,
             function: add_native,
         })
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
-        OpCode::PushConst(Value::Integer(2))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
-        OpCode::PushConst(Value::Integer(3))
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
-            .unwrap();
         OpCode::CallNative(2)
-            .execute(&mut execution, &mut heap, &mut mailbox)
-            .await
+            .execute(&mut execution, &mut heap)
             .unwrap();
         assert_eq!(execution.stack.pop(), Some(Value::Integer(5)));
     }
