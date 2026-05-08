@@ -39,9 +39,9 @@ impl Compiler {
                                 "expected variable index after StoreVar".into(),
                             )
                         })?;
-                        let index = index_token.parse::<usize>().map_err(|_| {
-                            CompilerError::InvalidAddress(index_token.to_string())
-                        })?;
+                        let index = index_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(index_token.to_string()))?;
                         bytecode.push(OpCode::StoreVar(index));
                     }
                     "LoadVar" => {
@@ -50,10 +50,75 @@ impl Compiler {
                                 "expected variable index after LoadVar".into(),
                             )
                         })?;
-                        let index = index_token.parse::<usize>().map_err(|_| {
-                            CompilerError::InvalidAddress(index_token.to_string())
-                        })?;
+                        let index = index_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(index_token.to_string()))?;
                         bytecode.push(OpCode::LoadVar(index));
+                    }
+                    "MakeArray" => {
+                        let length_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress("expected length after MakeArray".into())
+                        })?;
+                        let length = length_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(length_token.to_string()))?;
+                        bytecode.push(OpCode::MakeArray(length));
+                    }
+                    "ArrayGet" => bytecode.push(OpCode::ArrayGet),
+                    "ArraySet" => bytecode.push(OpCode::ArraySet),
+                    "MakeString" => {
+                        let value = tokens.next().ok_or_else(|| {
+                            CompilerError::ParseError(
+                                "expected string token after MakeString".into(),
+                            )
+                        })?;
+                        bytecode.push(OpCode::MakeString(value.to_string()));
+                    }
+                    "StringConcat" => bytecode.push(OpCode::StringConcat),
+                    "MakeModule" => {
+                        let export_count_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress(
+                                "expected export count after MakeModule".into(),
+                            )
+                        })?;
+                        let export_count = export_count_token.parse::<usize>().map_err(|_| {
+                            CompilerError::InvalidAddress(export_count_token.to_string())
+                        })?;
+                        let mut exports = Vec::with_capacity(export_count);
+                        for _ in 0..export_count {
+                            exports.push(
+                                tokens
+                                    .next()
+                                    .ok_or_else(|| {
+                                        CompilerError::ParseError(
+                                            "expected export name after MakeModule".into(),
+                                        )
+                                    })?
+                                    .to_string(),
+                            );
+                        }
+                        bytecode.push(OpCode::MakeModule(exports));
+                    }
+                    "ModuleGet" => {
+                        let name = tokens.next().ok_or_else(|| {
+                            CompilerError::ParseError("expected export name after ModuleGet".into())
+                        })?;
+                        bytecode.push(OpCode::ModuleGet(name.to_string()));
+                    }
+                    "ModuleSet" => {
+                        let name = tokens.next().ok_or_else(|| {
+                            CompilerError::ParseError("expected export name after ModuleSet".into())
+                        })?;
+                        bytecode.push(OpCode::ModuleSet(name.to_string()));
+                    }
+                    "CallNative" => {
+                        let arity_token = tokens.next().ok_or_else(|| {
+                            CompilerError::InvalidAddress("expected arity after CallNative".into())
+                        })?;
+                        let arity = arity_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(arity_token.to_string()))?;
+                        bytecode.push(OpCode::CallNative(arity));
                     }
                     "Pop" => bytecode.push(OpCode::Pop),
                     "Dup" => bytecode.push(OpCode::Dup),

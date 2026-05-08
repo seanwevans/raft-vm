@@ -286,7 +286,10 @@ mod tests {
         }
 
         if let Some(HeapObject::Actor(_, _, rc)) = vm.heap.get(actor_addr) {
-            assert_eq!(*rc, 0, "actor reference count should be 0 after failure");
+            assert_eq!(
+                *rc, 1,
+                "actor reference count should stay on stack after failure"
+            );
         } else {
             panic!("Expected HeapObject::Actor");
         }

@@ -12,7 +12,7 @@ pub struct Heap {
     next_address: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NativeFunction {
     pub name: String,
     pub arity: usize,
@@ -31,6 +31,12 @@ pub enum HeapObject {
     NativeFunction(NativeFunction, usize),
     Actor(VM, Sender<Value>, usize),
     Supervisor(VM, Sender<Value>, usize),
+}
+
+impl Default for Heap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Heap {

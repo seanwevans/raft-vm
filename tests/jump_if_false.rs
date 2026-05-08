@@ -7,7 +7,7 @@ use tokio::sync::mpsc::channel;
 
 #[tokio::test]
 async fn jump_if_false_errors_on_non_boolean() {
-    let mut ctx = ExecutionContext::new(vec![]);
+    let mut ctx = ExecutionContext::new(vec![OpCode::Return]);
     ctx.stack.push(Value::Integer(42));
     let mut heap = Heap::new();
     let (_tx, mut rx) = channel(1);
@@ -19,7 +19,7 @@ async fn jump_if_false_errors_on_non_boolean() {
 
 #[tokio::test]
 async fn jump_if_false_errors_on_empty_stack() {
-    let mut ctx = ExecutionContext::new(vec![]);
+    let mut ctx = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (_tx, mut rx) = channel(1);
     let result = OpCode::JumpIfFalse(0)
@@ -37,7 +37,7 @@ fn actor_ref_count(heap: &Heap, address: usize) -> usize {
 
 #[tokio::test]
 async fn jump_if_false_skips_jump_when_true() {
-    let mut ctx = ExecutionContext::new(vec![]);
+    let mut ctx = ExecutionContext::new(vec![OpCode::Return]);
     ctx.stack.push(Value::Boolean(true));
     ctx.ip = 7;
     let mut heap = Heap::new();
@@ -54,7 +54,7 @@ async fn jump_if_false_skips_jump_when_true() {
 
 #[tokio::test]
 async fn jump_if_false_drops_reference_on_type_mismatch() {
-    let mut ctx = ExecutionContext::new(vec![]);
+    let mut ctx = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (_tx, mut rx) = channel(1);
 
