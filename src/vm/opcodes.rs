@@ -158,10 +158,10 @@ impl OpCode {
         process: Option<ProcessContext>,
     ) -> Result<(), VmError> {
         match self {
-            OpCode::Add => binary_op(execution, heap, |a, b| a.add(b)),
-            OpCode::Sub => binary_op(execution, heap, |a, b| a.sub(b)),
-            OpCode::Mul => binary_op(execution, heap, |a, b| a.mul(b)),
-            OpCode::Div => binary_op(execution, heap, |a, b| a.div(b)),
+            OpCode::Add => binary_op(execution, heap, |a, b| a.checked_add(b)),
+            OpCode::Sub => binary_op(execution, heap, |a, b| a.checked_sub(b)),
+            OpCode::Mul => binary_op(execution, heap, |a, b| a.checked_mul(b)),
+            OpCode::Div => binary_op(execution, heap, |a, b| a.checked_div(b)),
             OpCode::Neg => unary_op(execution, heap, |a| match a {
                 Value::Integer(i) => Ok(Value::Integer(-i)),
                 Value::Float(f) => Ok(Value::Float(-f)),
@@ -190,10 +190,8 @@ impl OpCode {
             OpCode::StoreVar(index) => {
                 let value = pop_value(execution, heap)?;
 
-                if let Some(existing) = execution.locals.insert(*index, value) {
-                    if let Value::Reference(address) = existing {
-                        decrement_reference(heap, address)?;
-                    }
+                if let Some(Value::Reference(address)) = execution.locals.insert(*index, value) {
+                    decrement_reference(heap, address)?;
                 }
 
                 if let Value::Reference(address) = value {

@@ -39,9 +39,9 @@ impl Compiler {
                                 "expected variable index after StoreVar".into(),
                             )
                         })?;
-                        let index = index_token.parse::<usize>().map_err(|_| {
-                            CompilerError::InvalidAddress(index_token.to_string())
-                        })?;
+                        let index = index_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(index_token.to_string()))?;
                         bytecode.push(OpCode::StoreVar(index));
                     }
                     "LoadVar" => {
@@ -50,9 +50,9 @@ impl Compiler {
                                 "expected variable index after LoadVar".into(),
                             )
                         })?;
-                        let index = index_token.parse::<usize>().map_err(|_| {
-                            CompilerError::InvalidAddress(index_token.to_string())
-                        })?;
+                        let index = index_token
+                            .parse::<usize>()
+                            .map_err(|_| CompilerError::InvalidAddress(index_token.to_string()))?;
                         bytecode.push(OpCode::LoadVar(index));
                     }
                     "Pop" => bytecode.push(OpCode::Pop),

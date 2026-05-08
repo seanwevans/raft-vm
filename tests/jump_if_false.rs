@@ -54,7 +54,7 @@ async fn jump_if_false_skips_jump_when_true() {
 
 #[tokio::test]
 async fn jump_if_false_drops_reference_on_type_mismatch() {
-    let mut ctx = ExecutionContext::new(vec![]);
+    let mut ctx = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
     let (_tx, mut rx) = channel(1);
 
