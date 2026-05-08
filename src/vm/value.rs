@@ -1,6 +1,7 @@
 // src/vm/value.rs
 
 use crate::vm::error::VmError;
+use crate::vm::supervision::ExitSignal;
 use log;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -9,6 +10,7 @@ pub enum Value {
     Float(f64),
     Boolean(bool),
     Reference(usize),
+    ExitSignal(ExitSignal),
     Null,
 }
 
