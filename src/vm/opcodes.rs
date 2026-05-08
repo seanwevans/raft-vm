@@ -943,6 +943,7 @@ impl OpCode {
                         }
                         Err(TrySendError::Closed(message)) => {
                             push_value(execution, heap, Value::Reference(address))?;
+                            release_value(heap, message)?;
                             Err(VmError::ChannelSend {
                                 error: "channel closed".to_string(),
                                 value: message,

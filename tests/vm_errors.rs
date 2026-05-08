@@ -148,8 +148,8 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     {
         HeapObject::Array(_, rc) => {
             assert_eq!(
-                *rc, 1,
-                "failed_message in ChannelSend should own exactly one reference",
+                *rc, 0,
+                "failed send should release the retained message reference",
             )
         }
         other => panic!("expected array at message_addr, got {other:?}"),

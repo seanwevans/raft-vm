@@ -184,6 +184,7 @@ impl VM {
                     let error = err.to_string();
                     let value = err.0;
                     self.push_runtime_value(Value::Reference(actor_address))?;
+                    self.release_runtime_value(value)?;
                     Err(VmError::ChannelSend { error, value })
                 }
             },
@@ -195,6 +196,13 @@ impl VM {
             self.increment_reference(address)?;
         }
         self.execution.stack.push(value);
+        Ok(())
+    }
+
+    fn release_runtime_value(&mut self, value: Value) -> Result<(), VmError> {
+        if let Value::Reference(address) = value {
+            self.decrement_reference(address)?;
+        }
         Ok(())
     }
 
@@ -477,5 +485,59 @@ mod tests {
         } else {
             panic!("Expected HeapObject::Actor");
         }
+    }
+
+    #[tokio::test]
+    async fn blocking_send_failure_releases_retained_message_reference() {
+        use crate::vm::error::VmError;
+        use crate::vm::HeapObject;
+
+        let (mut vm, _tx) = VM::new(vec![OpCode::Return], None);
+        let (sender, receiver) = mpsc::channel(1);
+        drop(receiver);
+
+        let (actor_vm, actor_sender) = VM::new(vec![OpCode::Return], None);
+        let actor_addr = vm
+            .heap
+            .allocate(HeapObject::Actor(actor_vm, actor_sender, 0));
+        let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
+
+        if let Some(HeapObject::Array(_, rc)) = vm.heap.get_mut(message_addr) {
+            *rc = 1;
+        } else {
+            panic!("Expected message array");
+        }
+
+        let err = vm
+            .await_blocking_operation(BlockingOperation::SendMessage {
+                sender,
+                actor_address: actor_addr,
+                message: Value::Reference(message_addr),
+            })
+            .await
+            .expect_err("closed blocking send should fail");
+
+        match err {
+            VmError::ChannelSend { value, .. } => {
+                assert_eq!(value, Value::Reference(message_addr));
+            }
+            other => panic!("Expected ChannelSend error, got {other:?}"),
+        }
+
+        assert_eq!(
+            vm.execution.stack,
+            vec![Value::Reference(actor_addr)],
+            "actor reference should be restored on blocking send failure",
+        );
+        assert_eq!(
+            vm.heap_ref_count(actor_addr),
+            Some(1),
+            "actor reference count should stay on stack after blocking send failure",
+        );
+        assert_eq!(
+            vm.heap_ref_count(message_addr),
+            Some(0),
+            "blocking send failure should release retained message reference",
+        );
     }
 }
