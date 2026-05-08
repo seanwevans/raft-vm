@@ -58,6 +58,6 @@ impl Actor {
 
     /// Receive the next message if available.
     pub async fn handle_next_message(&mut self) -> Option<Value> {
-        self.vm.mailbox.recv().await
+        self.vm.mailbox_mut().recv().await
     }
 }

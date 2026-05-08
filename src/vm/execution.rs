@@ -5,10 +5,27 @@ use std::collections::HashMap;
 use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
-use crate::vm::opcodes::OpCode;
+use crate::vm::opcodes::Bytecode;
 use crate::vm::value::Value;
 
 use tokio::sync::mpsc::{Receiver, Sender};
+
+#[derive(Debug)]
+pub enum BlockingOperation {
+    ReceiveMessage,
+    SendMessage {
+        sender: Sender<Value>,
+        actor_address: usize,
+        message: Value,
+    },
+}
+
+#[derive(Debug)]
+pub enum ExecutionState {
+    Continue,
+    Yield(BlockingOperation),
+    Halted,
+}
 
 #[derive(Debug, Clone)]
 pub struct ProcessContext {
@@ -29,7 +46,12 @@ pub struct ExecutionContext {
 }
 
 impl ExecutionContext {
-    pub fn new(bytecode: Vec<OpCode>) -> Self {
+    pub fn new(bytecode: impl Into<Bytecode>) -> Self {
+        let (_tx, rx) = tokio::sync::mpsc::channel(100);
+        Self::with_mailbox(bytecode, rx)
+    }
+
+    pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
@@ -53,41 +75,36 @@ impl ExecutionContext {
         }
     }
 
-    pub async fn step(
-        &mut self,
-        heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
-    ) -> Result<(), VmError> {
-        self.step_inner(heap, mailbox, None).await
+    pub fn step(&mut self, heap: &mut Heap) -> Result<ExecutionState, VmError> {
+        self.step_inner(heap, None)
     }
 
-    pub async fn step_with_process(
+    pub fn step_with_process(
         &mut self,
         heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
         process_id: usize,
         self_sender: Sender<Value>,
         trap_exits: bool,
-    ) -> Result<(), VmError> {
+    ) -> Result<ExecutionState, VmError> {
         self.step_inner(
             heap,
-            mailbox,
             Some(ProcessContext {
                 process_id,
                 self_sender,
                 trap_exits,
             }),
         )
-        .await
     }
 
-    async fn step_inner(
+    fn step_inner(
         &mut self,
         heap: &mut Heap,
-        mailbox: &mut Receiver<Value>,
         process: Option<ProcessContext>,
-    ) -> Result<(), VmError> {
-        if self.ip >= self.bytecode.len() {
+    ) -> Result<ExecutionState, VmError> {
+        if self.ip == self.bytecode.len() {
+            return Ok(ExecutionState::Halted);
+        }
+        if self.ip > self.bytecode.len() {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
             return Err(VmError::ExecutionOutOfBounds);
         }
