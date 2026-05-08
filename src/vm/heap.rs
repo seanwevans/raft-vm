@@ -12,7 +12,7 @@ pub struct Heap {
     free_list: Vec<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NativeFunction {
     pub name: String,
     pub arity: usize,

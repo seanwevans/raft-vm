@@ -35,6 +35,7 @@ fn compile_control_flow_tokens() {
 }
 
 #[test]
+#[allow(clippy::approx_constant)]
 fn compile_float_tokens() {
     let source = "3.14 2.0 +";
     let bytecode = Compiler::compile(source).unwrap();
@@ -137,6 +138,29 @@ async fn run_propagates_compiler_error() {
         err,
         VmError::CompilationError(CompilerError::InvalidToken(_))
     ));
+}
+
+#[test]
+fn compile_heap_value_tokens() {
+    let source = concat!(
+        "1 2 MakeArray 2 ArrayGet ArraySet ",
+        "MakeString hello MakeString world StringConcat ",
+        "MakeModule 2 answer greeting ModuleGet answer ModuleSet greeting CallNative 2"
+    );
+    let bytecode = Compiler::compile(source).unwrap();
+
+    assert!(matches!(bytecode[2], OpCode::MakeArray(2)));
+    assert!(matches!(bytecode[3], OpCode::ArrayGet));
+    assert!(matches!(bytecode[4], OpCode::ArraySet));
+    assert!(matches!(&bytecode[5], OpCode::MakeString(value) if value == "hello"));
+    assert!(matches!(&bytecode[6], OpCode::MakeString(value) if value == "world"));
+    assert!(matches!(bytecode[7], OpCode::StringConcat));
+    assert!(
+        matches!(&bytecode[8], OpCode::MakeModule(exports) if exports == &["answer", "greeting"])
+    );
+    assert!(matches!(&bytecode[9], OpCode::ModuleGet(name) if name == "answer"));
+    assert!(matches!(&bytecode[10], OpCode::ModuleSet(name) if name == "greeting"));
+    assert!(matches!(bytecode[11], OpCode::CallNative(2)));
 }
 
 #[test]

@@ -28,6 +28,10 @@ pub enum VmError {
     ExportNotFound { module: String, export: String },
     #[error("Invalid reference")]
     InvalidReference,
+    #[error("Index out of bounds: index {index}, length {length}")]
+    IndexOutOfBounds { index: usize, length: usize },
+    #[error("Native arity mismatch: expected {expected}, got {actual}")]
+    NativeArityMismatch { expected: usize, actual: usize },
     #[error("Mailbox empty")]
     MailboxEmpty,
     #[error("Channel send error: {error}")]
