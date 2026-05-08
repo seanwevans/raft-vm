@@ -41,9 +41,10 @@ impl VM {
         supervisor: Option<Sender<usize>>,
     ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
-        let bytecode = bytecode.into();
+        let bytecode: Bytecode = bytecode.into();
         log::info!("Initializing VM with {} opcodes", bytecode.len());
-        let mut execution = ExecutionContext::new_with_debug(bytecode, debug_info);
+        let mut execution = ExecutionContext::with_mailbox(bytecode, rx);
+        execution.debug_info = debug_info;
         let mut heap = Heap::new();
         stdlib::install(&mut heap, &mut execution);
 
