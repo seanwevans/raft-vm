@@ -137,3 +137,52 @@ async fn run_propagates_compiler_error() {
         VmError::CompilationError(CompilerError::InvalidToken(_))
     ));
 }
+
+#[test]
+fn compile_with_labels_resolves_textual_targets() {
+    let source = "\n.start\ntrue\nJumpIfFalse .done\nJump .start\n.done\nReturn\n";
+    let program = Compiler::compile_with_debug(source).unwrap();
+
+    assert_eq!(program.bytecode.len(), 4);
+    assert!(matches!(program.bytecode[1], OpCode::JumpIfFalse(3)));
+    assert!(matches!(program.bytecode[2], OpCode::Jump(0)));
+}
+
+#[test]
+fn compile_with_debug_maps_instructions_to_source_locations() {
+    let source = "# comment\n1\n  2 Add\n";
+    let program = Compiler::compile_with_debug(source).unwrap();
+
+    assert_eq!(program.debug_info.location_for_ip(0).unwrap().line, 2);
+    assert_eq!(program.debug_info.location_for_ip(0).unwrap().column, 1);
+    assert_eq!(program.debug_info.location_for_ip(1).unwrap().line, 3);
+    assert_eq!(program.debug_info.location_for_ip(1).unwrap().column, 3);
+    assert_eq!(program.debug_info.location_for_ip(2).unwrap().line, 3);
+    assert_eq!(program.debug_info.location_for_ip(2).unwrap().column, 5);
+}
+
+#[test]
+fn lexer_preserves_string_literals_with_spaces() {
+    let source = "\"hello raft vm\"";
+    let program = Compiler::compile_with_debug(source).unwrap();
+
+    assert_eq!(
+        program.bytecode,
+        vec![OpCode::PushString("hello raft vm".into())]
+    );
+}
+
+#[tokio::test]
+async fn runtime_errors_include_debug_source_location() {
+    let err = run("\n1\n0\nDiv\n")
+        .await
+        .expect_err("division by zero should fail");
+
+    assert!(matches!(
+        err,
+        VmError::RuntimeError { location, source }
+            if location.line == 4
+                && location.column == 1
+                && matches!(*source, VmError::DivisionByZero)
+    ));
+}

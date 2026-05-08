@@ -1,7 +1,7 @@
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 
-use crate::compiler::CompilerError;
+use crate::compiler::{CompilerError, SourceLocation};
 use crate::vm::value::Value;
 
 #[derive(Error, Debug, Clone)]
@@ -30,6 +30,12 @@ pub enum VmError {
     ChannelSend { error: String, value: Value },
     #[error("Compilation error: {0}")]
     CompilationError(#[from] CompilerError),
+    #[error("Runtime error at line {}, column {}: {source}", location.line, location.column)]
+    RuntimeError {
+        location: SourceLocation,
+        #[source]
+        source: Box<VmError>,
+    },
 }
 
 impl From<String> for VmError {

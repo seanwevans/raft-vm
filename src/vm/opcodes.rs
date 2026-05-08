@@ -73,7 +73,7 @@ fn pop_value(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<Value,
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum OpCode {
     // Variables
     StoreVar(usize),
@@ -81,6 +81,7 @@ pub enum OpCode {
 
     // Stack
     PushConst(Value),
+    PushString(String),
     Pop,
     Dup,
     Swap,
@@ -129,6 +130,10 @@ impl OpCode {
                 _ => Err(VmError::TypeMismatch("Neg")),
             }),
             OpCode::PushConst(v) => push_value(execution, heap, *v),
+            OpCode::PushString(value) => {
+                let address = heap.allocate(HeapObject::String(value.clone(), 0));
+                push_value(execution, heap, Value::Reference(address))
+            }
             OpCode::Pop => {
                 pop_value(execution, heap)?;
                 Ok(())
@@ -262,7 +267,7 @@ impl OpCode {
 
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None);
+                let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
                 if *addr >= execution.bytecode.len() {
                     log::error!(
                         "SpawnActor target {} out of bounds (bytecode length {})",
@@ -312,7 +317,7 @@ impl OpCode {
             }
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None);
+                let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
                 if *addr >= execution.bytecode.len() {
                     log::error!(
                         "SpawnSupervisor target {} out of bounds (bytecode length {})",

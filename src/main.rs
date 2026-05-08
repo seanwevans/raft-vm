@@ -60,15 +60,15 @@ fn print_version() {
 async fn handle_run(filename: &str) {
     match fs::read_to_string(filename) {
         Ok(source) => {
-            let bytecode = match Compiler::compile(&source) {
-                Ok(b) => b,
+            let program = match Compiler::compile_with_debug(&source) {
+                Ok(program) => program,
                 Err(e) => {
                     let err: VmError = e.into();
                     eprintln!("{}", err);
                     process::exit(1);
                 }
             };
-            let (mut vm, tx) = VM::new(bytecode, None);
+            let (mut vm, tx) = VM::new_with_debug(program.bytecode, Some(program.debug_info), None);
 
             // Simulate sending messages to the VM
             tokio::spawn(async move {

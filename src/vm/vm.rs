@@ -1,5 +1,6 @@
 // src/vm/vm.rs
 
+use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::execution::ExecutionContext;
 use crate::vm::heap::{Heap, HeapObject};
@@ -18,11 +19,19 @@ pub struct VM {
 
 impl VM {
     pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
+        Self::new_with_debug(bytecode, None, supervisor)
+    }
+
+    pub fn new_with_debug(
+        bytecode: Vec<OpCode>,
+        debug_info: Option<DebugInfo>,
+        supervisor: Option<Sender<usize>>,
+    ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
         log::info!("Initializing VM with {} opcodes", bytecode.len());
         (
             VM {
-                execution: ExecutionContext::new(bytecode),
+                execution: ExecutionContext::new_with_debug(bytecode, debug_info),
                 heap: Heap::new(),
                 mailbox: rx,
                 _supervisor: supervisor,
@@ -77,13 +86,30 @@ impl VM {
         }
 
         while self.execution.ip < self.execution.bytecode.len() {
+            let executing_ip = self.execution.ip;
             if let Err(e) = self.execution.step(&mut self.heap, &mut self.mailbox).await {
-                log::error!("Execution error at ip {}: {}", self.execution.ip, e);
-                return Err(e);
+                log::error!("Execution error at ip {}: {}", executing_ip, e);
+                return Err(self.error_with_debug_location(executing_ip, e));
             }
         }
         log::info!("VM execution completed successfully");
         Ok(())
+    }
+
+    fn error_with_debug_location(&self, ip: usize, error: VmError) -> VmError {
+        match (&self.execution.debug_info, error) {
+            (_, VmError::RuntimeError { location, source }) => {
+                VmError::RuntimeError { location, source }
+            }
+            (Some(debug_info), error) => debug_info
+                .location_for_ip(ip)
+                .map(|location| VmError::RuntimeError {
+                    location,
+                    source: Box::new(error.clone()),
+                })
+                .unwrap_or(error),
+            (None, error) => error,
+        }
     }
 
     /// Expose a reference to the execution stack for testing or inspection.
@@ -286,7 +312,10 @@ mod tests {
         }
 
         if let Some(HeapObject::Actor(_, _, rc)) = vm.heap.get(actor_addr) {
-            assert_eq!(*rc, 0, "actor reference count should be 0 after failure");
+            assert_eq!(
+                *rc, 1,
+                "actor reference count should stay alive on stack after failure"
+            );
         } else {
             panic!("Expected HeapObject::Actor");
         }

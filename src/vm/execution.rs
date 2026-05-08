@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::OpCode;
@@ -16,16 +17,22 @@ pub struct ExecutionContext {
     pub ip: usize,
     pub call_stack: Vec<usize>,
     pub bytecode: Vec<OpCode>,
+    pub debug_info: Option<DebugInfo>,
 }
 
 impl ExecutionContext {
     pub fn new(bytecode: Vec<OpCode>) -> Self {
+        Self::new_with_debug(bytecode, None)
+    }
+
+    pub fn new_with_debug(bytecode: Vec<OpCode>, debug_info: Option<DebugInfo>) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
             ip: 0,
             call_stack: Vec::new(),
             bytecode,
+            debug_info,
         }
     }
 
