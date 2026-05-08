@@ -1,7 +1,6 @@
 use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject};
 use raft::vm::{error::VmError, opcodes::OpCode, value::Value, vm::VM};
-use tokio::sync::mpsc::channel;
 
 #[tokio::test]
 async fn division_by_zero_returns_error() {
@@ -96,12 +95,10 @@ async fn spawn_supervisor_out_of_bounds_returns_error() {
 async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    let (_tx, mut mailbox) = channel(1);
 
     // Stack layout expected by SendMessage is [message, actor_ref].
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("spawn actor should succeed");
     let actor_addr = match execution.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
@@ -110,12 +107,10 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
 
     let message_addr = heap.allocate(HeapObject::Array(vec![], 0));
     OpCode::PushConst(Value::Reference(message_addr))
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("push message reference should succeed");
     OpCode::Swap
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect("swap should succeed");
 
     // Close actor mailbox to force ChannelSend error.
@@ -123,13 +118,12 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
         .get_mut(actor_addr)
         .expect("spawned actor should be in heap");
     match actor_entry {
-        HeapObject::Actor(actor_vm, _, _) => actor_vm.mailbox.close(),
+        HeapObject::Actor(actor_vm, _, _) => actor_vm.mailbox_mut().close(),
         other => panic!("expected actor in heap, got {other:?}"),
     }
 
     let err = OpCode::SendMessage
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .expect_err("send should fail when mailbox is closed");
 
     match err {
@@ -161,9 +155,15 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
         }
         other => panic!("expected array at message_addr, got {other:?}"),
     }
+}
+
+#[tokio::test]
 async fn top_level_return_gracefully_halts_vm() {
     let code = vec![OpCode::Return];
     let (mut vm, _tx) = VM::new(code, None);
     let result = vm.run().await;
-    assert!(result.is_ok(), "expected top-level return to halt gracefully");
+    assert!(
+        result.is_ok(),
+        "expected top-level return to halt gracefully"
+    );
 }

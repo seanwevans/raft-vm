@@ -19,8 +19,7 @@ use std::io::Write;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[derive(Parser)]
-#[command(name = "raft",author, version, about, long_about = None)]
-
+#[command(name = "raft", author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

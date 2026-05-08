@@ -16,11 +16,9 @@ fn actor_ref_count(heap: &Heap, address: usize) -> usize {
 async fn actor_reference_lifecycle_on_stack() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    let (_tx, mut mailbox) = channel(1);
 
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
 
     let address = match execution.stack.last().copied() {
@@ -30,22 +28,13 @@ async fn actor_reference_lifecycle_on_stack() {
 
     assert_eq!(actor_ref_count(&heap, address), 1);
 
-    OpCode::Dup
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap();
+    OpCode::Dup.execute(&mut execution, &mut heap).unwrap();
     assert_eq!(actor_ref_count(&heap, address), 2);
 
-    OpCode::Pop
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap();
+    OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     assert_eq!(actor_ref_count(&heap, address), 1);
 
-    OpCode::Pop
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap();
+    OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     assert_eq!(actor_ref_count(&heap, address), 0);
 
     heap.collect_garbage();
@@ -54,14 +43,13 @@ async fn actor_reference_lifecycle_on_stack() {
 
 #[tokio::test]
 async fn send_and_receive_message_updates_reference_counts() {
-    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+    let (tx, rx) = channel(1);
+    let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], rx);
     let mut heap = Heap::new();
-    let (tx, mut mailbox) = channel(1);
 
     // Spawn target actor (A) and message actor (B)
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
     let actor_a = match execution.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
@@ -69,22 +57,17 @@ async fn send_and_receive_message_updates_reference_counts() {
     };
 
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
     let actor_b = match execution.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
         _ => panic!("Expected actor reference for message"),
     };
 
-    OpCode::Swap
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap();
+    OpCode::Swap.execute(&mut execution, &mut heap).unwrap();
 
     OpCode::SendMessage
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
 
     assert_eq!(actor_ref_count(&heap, actor_a), 1, "actor on stack");
@@ -94,7 +77,7 @@ async fn send_and_receive_message_updates_reference_counts() {
     let message = {
         let actor_entry = heap.get_mut(actor_a).expect("Expected actor VM for target");
         match actor_entry {
-            HeapObject::Actor(vm, _, _) => vm.mailbox.recv().await,
+            HeapObject::Actor(vm, _, _) => vm.mailbox_mut().recv().await,
             _ => panic!("Expected actor VM for target"),
         }
     }
@@ -112,21 +95,14 @@ async fn send_and_receive_message_updates_reference_counts() {
     tx.send(message).await.unwrap();
 
     OpCode::ReceiveMessage
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
 
     assert_eq!(actor_ref_count(&heap, actor_b), 1, "message now on stack");
 
     // Drop both stack references and collect.
-    OpCode::Pop
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap();
-    OpCode::Pop
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap();
+    OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
+    OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     assert_eq!(actor_ref_count(&heap, actor_b), 0);
 
     heap.collect_garbage();
@@ -162,11 +138,9 @@ async fn vm_pop_stack_drops_actor_reference() {
 async fn neg_type_mismatch_consumes_reference_operand() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    let (_tx, mut mailbox) = channel(1);
 
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
 
     let address = match execution.stack.last().copied() {
@@ -174,10 +148,7 @@ async fn neg_type_mismatch_consumes_reference_operand() {
         other => panic!("Expected actor reference on stack, got {other:?}"),
     };
 
-    let err = OpCode::Neg
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap_err();
+    let err = OpCode::Neg.execute(&mut execution, &mut heap).unwrap_err();
     assert!(matches!(err, raft::vm::error::VmError::TypeMismatch("Neg")));
     assert!(execution.stack.is_empty(), "operand should be consumed");
     assert_eq!(actor_ref_count(&heap, address), 0);
@@ -190,11 +161,9 @@ async fn neg_type_mismatch_consumes_reference_operand() {
 async fn add_and_mod_type_mismatch_do_not_leak_references() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    let (_tx, mut mailbox) = channel(1);
 
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
     let add_ref = match execution.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
@@ -202,10 +171,7 @@ async fn add_and_mod_type_mismatch_do_not_leak_references() {
     };
     execution.stack.push(Value::Integer(1));
 
-    let add_err = OpCode::Add
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap_err();
+    let add_err = OpCode::Add.execute(&mut execution, &mut heap).unwrap_err();
     assert!(matches!(
         add_err,
         raft::vm::error::VmError::TypeMismatch("Add")
@@ -214,8 +180,7 @@ async fn add_and_mod_type_mismatch_do_not_leak_references() {
     assert_eq!(actor_ref_count(&heap, add_ref), 0);
 
     OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
+        .execute(&mut execution, &mut heap)
         .unwrap();
     let mod_ref = match execution.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
@@ -223,10 +188,7 @@ async fn add_and_mod_type_mismatch_do_not_leak_references() {
     };
     execution.stack.push(Value::Integer(2));
 
-    let mod_err = OpCode::Mod
-        .execute(&mut execution, &mut heap, &mut mailbox)
-        .await
-        .unwrap_err();
+    let mod_err = OpCode::Mod.execute(&mut execution, &mut heap).unwrap_err();
     assert!(matches!(
         mod_err,
         raft::vm::error::VmError::TypeMismatch("Mod")

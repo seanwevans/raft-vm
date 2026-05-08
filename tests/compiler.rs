@@ -36,11 +36,11 @@ fn compile_control_flow_tokens() {
 
 #[test]
 fn compile_float_tokens() {
-    let source = "3.14 2.0 +";
+    let source = "3.5 2.0 +";
     let bytecode = Compiler::compile(source).unwrap();
     assert_eq!(bytecode.len(), 3);
     assert!(
-        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.14).abs() < f64::EPSILON)
+        matches!(bytecode[0], OpCode::PushConst(Value::Float(f)) if (f - 3.5).abs() < f64::EPSILON)
     );
     assert!(
         matches!(bytecode[1], OpCode::PushConst(Value::Float(f)) if (f - 2.0).abs() < f64::EPSILON)

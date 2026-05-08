@@ -3,17 +3,13 @@ use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject};
 use raft::vm::opcodes::OpCode;
 use raft::vm::value::Value;
-use tokio::sync::mpsc::channel;
 
 #[tokio::test]
 async fn jump_if_false_errors_on_non_boolean() {
     let mut ctx = ExecutionContext::new(vec![]);
     ctx.stack.push(Value::Integer(42));
     let mut heap = Heap::new();
-    let (_tx, mut rx) = channel(1);
-    let result = OpCode::JumpIfFalse(0)
-        .execute(&mut ctx, &mut heap, &mut rx)
-        .await;
+    let result = OpCode::JumpIfFalse(0).execute(&mut ctx, &mut heap);
     assert!(matches!(result, Err(VmError::TypeMismatch("JumpIfFalse"))));
 }
 
@@ -21,10 +17,7 @@ async fn jump_if_false_errors_on_non_boolean() {
 async fn jump_if_false_errors_on_empty_stack() {
     let mut ctx = ExecutionContext::new(vec![]);
     let mut heap = Heap::new();
-    let (_tx, mut rx) = channel(1);
-    let result = OpCode::JumpIfFalse(0)
-        .execute(&mut ctx, &mut heap, &mut rx)
-        .await;
+    let result = OpCode::JumpIfFalse(0).execute(&mut ctx, &mut heap);
     assert!(matches!(result, Err(VmError::StackUnderflow)));
 }
 
@@ -41,11 +34,9 @@ async fn jump_if_false_skips_jump_when_true() {
     ctx.stack.push(Value::Boolean(true));
     ctx.ip = 7;
     let mut heap = Heap::new();
-    let (_tx, mut rx) = channel(1);
 
     OpCode::JumpIfFalse(99)
-        .execute(&mut ctx, &mut heap, &mut rx)
-        .await
+        .execute(&mut ctx, &mut heap)
         .unwrap();
 
     assert_eq!(ctx.ip, 7);
@@ -54,14 +45,10 @@ async fn jump_if_false_skips_jump_when_true() {
 
 #[tokio::test]
 async fn jump_if_false_drops_reference_on_type_mismatch() {
-    let mut ctx = ExecutionContext::new(vec![]);
+    let mut ctx = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    let (_tx, mut rx) = channel(1);
 
-    OpCode::SpawnActor(0)
-        .execute(&mut ctx, &mut heap, &mut rx)
-        .await
-        .unwrap();
+    OpCode::SpawnActor(0).execute(&mut ctx, &mut heap).unwrap();
 
     let address = match ctx.stack.last().copied() {
         Some(Value::Reference(addr)) => addr,
@@ -70,9 +57,7 @@ async fn jump_if_false_drops_reference_on_type_mismatch() {
 
     assert_eq!(actor_ref_count(&heap, address), 1);
 
-    let result = OpCode::JumpIfFalse(0)
-        .execute(&mut ctx, &mut heap, &mut rx)
-        .await;
+    let result = OpCode::JumpIfFalse(0).execute(&mut ctx, &mut heap);
 
     assert!(matches!(result, Err(VmError::TypeMismatch("JumpIfFalse"))));
     assert!(ctx.stack.is_empty());
