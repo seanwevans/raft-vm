@@ -505,7 +505,7 @@ impl Bytecode {
             OpCode::Exp => self.emit(OP_EXP),
             OpCode::ArrayGet => self.emit(OP_ARRAY_GET),
             OpCode::ArraySet => self.emit(OP_ARRAY_SET),
-            OpCode::MakeString(value) => {
+            OpCode::MakeString(value) | OpCode::PushString(value) => {
                 let index = self.push_constant(BytecodeConstant::String(value));
                 self.emit_operand(OP_MAKE_STRING, index);
             }
@@ -671,6 +671,7 @@ pub enum OpCode {
     ModuleGet(String),
     ModuleSet(String),
     MakeNativeFunction(NativeFunction),
+    CallNative(usize),
 
     // Control Flow
     Jump(usize),

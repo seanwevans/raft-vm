@@ -5,7 +5,7 @@ use crate::stdlib;
 use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
 use crate::vm::heap::{Heap, HeapObject};
-use crate::vm::opcodes::Bytecode;
+use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::supervision::{
     ChildSpec, ExitReason, ExitSignal, SupervisorState, SupervisorStrategy,
 };
@@ -36,14 +36,14 @@ impl VM {
     }
 
     pub fn new_with_debug(
-        bytecode: Vec<OpCode>,
+        bytecode: impl Into<Bytecode>,
         debug_info: Option<DebugInfo>,
         supervisor: Option<Sender<usize>>,
     ) -> (Self, Sender<Value>) {
         let (tx, rx) = mpsc::channel(100);
-        let bytecode = bytecode.into();
+        let bytecode: Bytecode = bytecode.into();
         log::info!("Initializing VM with {} opcodes", bytecode.len());
-        let mut execution = ExecutionContext::new_with_debug(bytecode, debug_info);
+        let mut execution = ExecutionContext::with_mailbox_and_debug(bytecode, rx, debug_info);
         let mut heap = Heap::new();
         stdlib::install(&mut heap, &mut execution);
 
@@ -219,6 +219,29 @@ impl VM {
     /// Expose a reference to the execution stack for testing or inspection.
     pub fn stack(&self) -> &Vec<Value> {
         &self.execution.stack
+    }
+
+    /// Return heap addresses referenced by this VM's execution roots.
+    ///
+    /// This intentionally exposes only copied heap addresses instead of the
+    /// mutable stack, locals, or globals collections so the GC can trace VMs
+    /// embedded in heap objects without giving callers access to VM internals.
+    pub fn heap_references(&self) -> Vec<usize> {
+        self.execution
+            .stack
+            .iter()
+            .chain(self.execution.locals().values())
+            .chain(self.execution.globals().values())
+            .filter_map(|value| match value {
+                Value::Reference(address) => Some(*address),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_stack_value_for_test(&mut self, value: Value) {
+        self.execution.stack.push(value);
     }
 
     pub fn process_id(&self) -> usize {
