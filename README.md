@@ -92,11 +92,12 @@ Pop
 true 3.14
 ```
 
-The current compiler tokenizes whitespace separated integers, floats
-(tokens containing a decimal point), booleans (`true`/`false`), basic
-arithmetic like `+`, and stack/variable keywords such as `StoreVar`,
-`LoadVar`, `Pop`, `Dup`, and `Swap`. Running the above file will leave
-`3`, `true`, and `3.14` on the VM's stack.
+The compiler now uses a lexer/parser pipeline that supports integers, floats,
+booleans (`true`/`false`), string literals with spaces (for example,
+`"hello raft vm"`), `#` and `//` comments, textual labels such as `.loop`,
+basic arithmetic like `+`, and stack/variable keywords such as `StoreVar`,
+`LoadVar`, `Pop`, `Dup`, and `Swap`. Running the above file will leave `3`,
+`true`, and `3.14` on the VM's stack.
 
 Native standard-library functions are injected when a VM starts. For example,
 `io.print` loads the standard `io` module's `print` export, and `CallNative 1`

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::OpCode;
@@ -24,6 +25,7 @@ pub struct ExecutionContext {
     pub ip: usize,
     pub call_stack: Vec<usize>,
     pub bytecode: Vec<OpCode>,
+    pub debug_info: Option<DebugInfo>,
 }
 
 impl ExecutionContext {
@@ -35,6 +37,19 @@ impl ExecutionContext {
             ip: 0,
             call_stack: Vec::new(),
             bytecode,
+            debug_info: None,
+        }
+    }
+
+    pub fn new_with_debug(bytecode: Vec<OpCode>, debug_info: Option<DebugInfo>) -> Self {
+        Self {
+            stack: Vec::new(),
+            locals: HashMap::new(),
+            globals: HashMap::new(),
+            ip: 0,
+            call_stack: Vec::new(),
+            bytecode,
+            debug_info,
         }
     }
 
@@ -77,13 +92,33 @@ impl ExecutionContext {
             return Err(VmError::ExecutionOutOfBounds);
         }
 
-        let opcode = self.bytecode[self.ip];
+        let instruction_ip = self.ip;
+        let opcode = self.bytecode[self.ip].clone();
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);
         opcode
             .execute_with_process(self, heap, mailbox, process)
             .await
+            .map_err(|error| self.with_debug_location(error, instruction_ip))
+    }
+
+    fn with_debug_location(&self, error: VmError, instruction_ip: usize) -> VmError {
+        if matches!(error, VmError::RuntimeError { .. }) {
+            return error;
+        }
+
+        match self
+            .debug_info
+            .as_ref()
+            .and_then(|debug_info| debug_info.location_for_instruction(instruction_ip))
+        {
+            Some(location) => VmError::RuntimeError {
+                location,
+                source: Box::new(error),
+            },
+            None => error,
+        }
     }
 
     pub fn ip(&self) -> usize {

@@ -169,12 +169,6 @@ impl Heap {
     }
 }
 
-impl Default for Heap {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl HeapObject {
     pub fn is_alive(&self) -> bool {
         self.ref_count() > 0

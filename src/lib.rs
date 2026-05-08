@@ -15,8 +15,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Runs a Raft program from source code
 pub async fn run(source: &str) -> Result<(), VmError> {
-    let bytecode = Compiler::compile(source)?;
+    let program = Compiler::compile_with_debug(source)?;
 
-    let (mut vm, _tx) = VM::new(bytecode, None);
+    let (mut vm, _tx) = VM::new_with_debug(program.bytecode, Some(program.debug_info), None);
     vm.run().await
 }

@@ -1,9 +1,8 @@
 // src/vm/opcodes.rs
 
 use crate::vm::error::VmError;
-use crate::vm::execution::ExecutionContext;
-use crate::vm::heap::{Heap, HeapObject, NativeFunction};
 use crate::vm::execution::{ExecutionContext, ProcessContext};
+use crate::vm::heap::{Heap, HeapObject, NativeFunction};
 use crate::vm::supervision::ChildSpec;
 use crate::vm::value::Value;
 use crate::vm::vm::VM;
@@ -311,6 +310,20 @@ fn module_set(
     push_value(execution, heap, Value::Reference(address))
 }
 
+fn native_function_at(
+    execution: &ExecutionContext,
+    heap: &Heap,
+    stack_index: usize,
+) -> Option<NativeFunction> {
+    match execution.stack.get(stack_index) {
+        Some(Value::Reference(address)) => match heap.get(*address) {
+            Some(HeapObject::NativeFunction(function, _)) => Some(function.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn call_native(
     execution: &mut ExecutionContext,
     heap: &mut Heap,
@@ -320,26 +333,33 @@ fn call_native(
         return Err(VmError::StackUnderflowFor("CallNative"));
     }
 
-    let mut args = Vec::with_capacity(arity);
-    for _ in 0..arity {
-        args.push(pop_value(execution, heap)?);
-    }
-    args.reverse();
-
-    let function_ref = pop_value(execution, heap)?;
-    let function = match function_ref {
-        Value::Reference(address) => match heap.get(address) {
-            Some(HeapObject::NativeFunction(function, _)) => function.clone(),
-            _ => return Err(VmError::InvalidReference),
-        },
-        _ => return Err(VmError::TypeMismatch("CallNative")),
-    };
+    let top_index = execution.stack.len() - 1;
+    let function_index = execution.stack.len() - arity - 1;
+    let function = native_function_at(execution, heap, top_index)
+        .or_else(|| native_function_at(execution, heap, function_index))
+        .ok_or(VmError::InvalidReference)?;
 
     if function.arity != arity {
         return Err(VmError::NativeArityMismatch {
             expected: function.arity,
             actual: arity,
         });
+    }
+
+    let callable_on_top = native_function_at(execution, heap, top_index).is_some();
+    let mut args = Vec::with_capacity(arity);
+    if callable_on_top {
+        pop_value(execution, heap)?;
+        for _ in 0..arity {
+            args.push(pop_value(execution, heap)?);
+        }
+        args.reverse();
+    } else {
+        for _ in 0..arity {
+            args.push(pop_value(execution, heap)?);
+        }
+        args.reverse();
+        pop_value(execution, heap)?;
     }
 
     let result = (function.function)(args)?;
@@ -374,12 +394,12 @@ pub enum OpCode {
     ArrayGet,
     ArraySet,
     MakeString(String),
+    PushString(String),
     StringConcat,
     MakeModule(Vec<String>),
     ModuleGet(String),
     ModuleSet(String),
     MakeNativeFunction(NativeFunction),
-    CallNative(usize),
 
     // Control Flow
     Jump(usize),
@@ -521,7 +541,7 @@ impl OpCode {
             }),
             OpCode::ArrayGet => array_get(execution, heap),
             OpCode::ArraySet => array_set(execution, heap),
-            OpCode::MakeString(value) => {
+            OpCode::MakeString(value) | OpCode::PushString(value) => {
                 let address = heap.allocate(HeapObject::String(value.clone(), 0));
                 push_value(execution, heap, Value::Reference(address))
             }
@@ -533,7 +553,6 @@ impl OpCode {
                 let address = heap.allocate(HeapObject::NativeFunction(function.clone(), 0));
                 push_value(execution, heap, Value::Reference(address))
             }
-            OpCode::CallNative(arity) => call_native(execution, heap, *arity),
             OpCode::Jump(target) => {
                 if *target > execution.bytecode.len() {
                     log::error!(
@@ -582,38 +601,7 @@ impl OpCode {
                 Ok(())
             }
 
-            OpCode::CallNative(arity) => {
-                let callable = pop_value(execution, heap)?;
-                let Value::Reference(address) = callable else {
-                    return Err(VmError::InvalidReference);
-                };
-
-                let native = match heap.get(address) {
-                    Some(HeapObject::NativeFunction(native, _)) => native,
-                    _ => return Err(VmError::InvalidReference),
-                };
-
-                if native.arity != *arity {
-                    return Err(VmError::Message(format!(
-                        "Native function `{}` expected {} argument(s), got {}",
-                        native.name, native.arity, arity
-                    )));
-                }
-
-                if execution.stack.len() < *arity {
-                    return Err(VmError::StackUnderflowFor("CallNative"));
-                }
-
-                let function = native.function;
-                let mut args = Vec::with_capacity(*arity);
-                for _ in 0..*arity {
-                    args.push(pop_value(execution, heap)?);
-                }
-                args.reverse();
-
-                let result = function(args)?;
-                push_value(execution, heap, result)
-            }
+            OpCode::CallNative(arity) => call_native(execution, heap, *arity),
             OpCode::Return => {
                 if let Some(return_addr) = execution.call_stack.pop() {
                     execution.ip = return_addr;
@@ -638,7 +626,7 @@ impl OpCode {
 
             OpCode::SpawnActor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None);
+                let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
                 if *addr > execution.bytecode.len() {
                     log::error!(
                         "SpawnActor target {} out of bounds (bytecode length {})",
@@ -696,7 +684,7 @@ impl OpCode {
             }
             OpCode::SpawnSupervisor(addr) => {
                 let bytecode = execution.bytecode.clone();
-                let (mut vm, tx) = VM::new(bytecode, None);
+                let (mut vm, tx) = VM::new_with_debug(bytecode, execution.debug_info.clone(), None);
                 if *addr > execution.bytecode.len() {
                     log::error!(
                         "SpawnSupervisor target {} out of bounds (bytecode length {})",
