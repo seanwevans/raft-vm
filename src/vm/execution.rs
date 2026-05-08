@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
-use crate::vm::opcodes::OpCode;
+use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::value::Value;
 
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -39,11 +39,12 @@ pub struct ExecutionContext {
     pub stack: Vec<Value>,
     pub locals: HashMap<usize, Value>,
     pub globals: HashMap<String, Value>,
+    mailbox: Receiver<Value>,
     pub ip: usize,
     pub call_stack: Vec<usize>,
-    pub bytecode: Vec<OpCode>,
+    pub bytecode: Bytecode,
     pub debug_info: Option<DebugInfo>,
-    mailbox: Receiver<Value>,
+    pub mailbox: Receiver<Value>,
 }
 
 impl ExecutionContext {
@@ -52,31 +53,40 @@ impl ExecutionContext {
         Self::with_mailbox(bytecode, rx)
     }
 
-    pub fn with_mailbox(bytecode: Vec<OpCode>, mailbox: Receiver<Value>) -> Self {
+    pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
+        let bytecode = Self::decode_bytecode(bytecode);
+
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
             globals: HashMap::new(),
+            mailbox,
             ip: 0,
             call_stack: Vec::new(),
-            bytecode,
+            bytecode: bytecode.into(),
             debug_info: None,
             mailbox,
         }
     }
 
-    pub fn new_with_debug(
-        bytecode: Vec<OpCode>,
-        debug_info: Option<DebugInfo>,
+    pub fn new_with_debug(bytecode: impl Into<Bytecode>, debug_info: Option<DebugInfo>) -> Self {
+        let (_tx, rx) = tokio::sync::mpsc::channel(100);
+        Self::with_mailbox_and_debug(bytecode, rx, debug_info)
+    }
+
+    pub fn with_mailbox_and_debug(
+        bytecode: impl Into<Bytecode>,
         mailbox: Receiver<Value>,
+        debug_info: Option<DebugInfo>,
     ) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
             globals: HashMap::new(),
+            mailbox,
             ip: 0,
             call_stack: Vec::new(),
-            bytecode,
+            bytecode: bytecode.into(),
             debug_info,
             mailbox,
         }
@@ -117,7 +127,7 @@ impl ExecutionContext {
         }
 
         let instruction_ip = self.ip;
-        let opcode = self.bytecode[self.ip].clone();
+        let opcode = self.bytecode.decode(self.ip)?;
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
         log::info!("Executing opcode: {:?}", opcode);
@@ -170,5 +180,9 @@ impl ExecutionContext {
 
     pub fn globals_mut(&mut self) -> &mut HashMap<String, Value> {
         &mut self.globals
+    }
+
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+        &mut self.mailbox
     }
 }

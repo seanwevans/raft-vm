@@ -15,6 +15,72 @@ async fn division_by_zero_returns_error() {
 }
 
 #[tokio::test]
+async fn integer_add_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MAX)),
+        OpCode::PushConst(Value::Integer(1)),
+        OpCode::Add,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_sub_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MIN)),
+        OpCode::PushConst(Value::Integer(1)),
+        OpCode::Sub,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_mul_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MAX)),
+        OpCode::PushConst(Value::Integer(2)),
+        OpCode::Mul,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_neg_overflow_returns_error() {
+    let code = vec![OpCode::PushConst(Value::Integer(i32::MIN)), OpCode::Neg];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
+async fn integer_exp_overflow_returns_error() {
+    let code = vec![
+        OpCode::PushConst(Value::Integer(i32::MAX)),
+        OpCode::PushConst(Value::Integer(2)),
+        OpCode::Exp,
+    ];
+    let (mut vm, _tx) = VM::new(code, None);
+
+    let err = vm.run().await.expect_err("expected integer overflow");
+
+    assert!(matches!(err, VmError::IntegerOverflow));
+}
+
+#[tokio::test]
 async fn pop_on_empty_stack_returns_error() {
     let code = vec![OpCode::Pop];
     let (mut vm, _tx) = VM::new(code, None);
@@ -92,6 +158,28 @@ async fn spawn_supervisor_out_of_bounds_returns_error() {
 }
 
 #[tokio::test]
+async fn spawn_actor_at_bytecode_len_returns_error() {
+    let code = vec![OpCode::SpawnActor(1)];
+    let (mut vm, _tx) = VM::new(code, None);
+    let err = vm
+        .run()
+        .await
+        .expect_err("expected execution out of bounds for spawn actor at bytecode length");
+    assert!(matches!(err, VmError::ExecutionOutOfBounds));
+}
+
+#[tokio::test]
+async fn spawn_supervisor_at_bytecode_len_returns_error() {
+    let code = vec![OpCode::SpawnSupervisor(1)];
+    let (mut vm, _tx) = VM::new(code, None);
+    let err = vm
+        .run()
+        .await
+        .expect_err("expected execution out of bounds for spawn supervisor at bytecode length");
+    assert!(matches!(err, VmError::ExecutionOutOfBounds));
+}
+
+#[tokio::test]
 async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
@@ -148,8 +236,8 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     {
         HeapObject::Array(_, rc) => {
             assert_eq!(
-                *rc, 1,
-                "failed_message in ChannelSend should own exactly one reference",
+                *rc, 0,
+                "failed send should release the retained message reference",
             )
         }
         other => panic!("expected array at message_addr, got {other:?}"),
