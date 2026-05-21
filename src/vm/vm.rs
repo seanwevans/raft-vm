@@ -213,25 +213,10 @@ impl VM {
         Ok(())
     }
 
-    fn release_runtime_value(&mut self, value: Value) -> Result<(), VmError> {
-        if let Value::Reference(address) = value {
-            self.release_reference(address)?;
-        }
-        Ok(())
-    }
-
     fn increment_reference(&mut self, address: usize) -> Result<(), VmError> {
         if let Some(object) = self.heap.get_mut(address) {
             object.increment_ref();
             Ok(())
-        } else {
-            Err(VmError::InvalidReference)
-        }
-    }
-
-    fn release_reference(&mut self, address: usize) -> Result<(), VmError> {
-        if self.heap.get(address).is_some() {
-            self.heap.release_reference(address)
         } else {
             Err(VmError::InvalidReference)
         }
