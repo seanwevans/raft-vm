@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::value::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
 use crate::compiler::DebugInfo;
@@ -25,6 +25,10 @@ pub struct NativeFunction {
 }
 
 #[derive(Debug)]
+/// While a process is running, the only way to communicate with it from outside is via the
+/// `Sender<Value>` stored alongside the handle in `HeapObject::Actor`. The handle itself
+/// exposes no live mailbox view; the running VM owns it. Post-mortem state is available via
+/// `pop_stack` once `run` has been awaited.
 pub struct ProcessHandle {
     process_id: usize,
     parent: Option<usize>,
@@ -36,8 +40,6 @@ pub struct ProcessHandle {
     trap_exits: bool,
     supervisor_state: SupervisorState,
     task: Option<JoinHandle<Result<(), VmError>>>,
-    mailbox: Receiver<Value>,
-    mailbox_sender: Sender<Value>,
     final_stack: Arc<Mutex<Vec<Value>>>,
 }
 
@@ -66,8 +68,6 @@ impl ProcessHandle {
         links: Vec<Sender<Value>>,
         trap_exits: bool,
         task: JoinHandle<Result<(), VmError>>,
-        mailbox: Receiver<Value>,
-        mailbox_sender: Sender<Value>,
         final_stack: Arc<Mutex<Vec<Value>>>,
     ) -> Self {
         Self {
@@ -81,8 +81,6 @@ impl ProcessHandle {
             trap_exits,
             supervisor_state: SupervisorState::default(),
             task: Some(task),
-            mailbox,
-            mailbox_sender,
             final_stack,
         }
     }
@@ -127,8 +125,6 @@ impl ProcessHandle {
         &mut self,
         task: JoinHandle<Result<(), VmError>>,
         start_ip: usize,
-        mailbox: Receiver<Value>,
-        mailbox_sender: Sender<Value>,
     ) {
         if let Some(task) = &self.task {
             task.abort();
@@ -136,8 +132,6 @@ impl ProcessHandle {
         self.task = Some(task);
         self.start_ip = start_ip;
         self.current_ip = start_ip;
-        self.mailbox = mailbox;
-        self.mailbox_sender = mailbox_sender;
     }
 
     pub async fn run(&mut self) -> Result<(), VmError> {
@@ -159,22 +153,6 @@ impl ProcessHandle {
             .ok_or(VmError::StackUnderflow)
     }
 
-    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
-        &mut self.mailbox
-    }
-
-    pub fn is_mailbox_closed(&self) -> bool {
-        self.mailbox.is_closed()
-    }
-
-    pub fn mailbox_sender(&self) -> Sender<Value> {
-        self.mailbox_sender.clone()
-    }
-
-    /// Returns heap references observed in the process's `final_stack` snapshot.
-    ///
-    /// Known limitation (option 3): this only captures references once the task
-    /// has completed and written its final stack, so in-flight references are not visible.
     pub fn heap_references(&self) -> Vec<usize> {
         self.final_stack
             .lock()
