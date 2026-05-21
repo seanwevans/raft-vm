@@ -499,13 +499,15 @@ mod tests {
         vm.execution.step(&mut vm.heap).unwrap();
         vm.execution.step(&mut vm.heap).unwrap();
 
-        // Close actor mailbox to force send failure
+        // Swap actor sender with a closed channel to force send failure
         let actor_addr = match vm.execution.stack.last() {
             Some(Value::Reference(addr)) => *addr,
             other => panic!("Expected actor reference, got {:?}", other),
         };
-        if let Some(HeapObject::Actor(actor_vm, _, _)) = vm.heap.get_mut(actor_addr) {
-            actor_vm.mailbox_mut().close();
+        if let Some(HeapObject::Actor(_, actor_sender, _)) = vm.heap.get_mut(actor_addr) {
+            let (closed_sender, closed_receiver) = mpsc::channel(1);
+            drop(closed_receiver);
+            *actor_sender = closed_sender;
         } else {
             panic!("Expected HeapObject::Actor");
         }
@@ -536,7 +538,6 @@ mod tests {
         use crate::vm::heap::ProcessHandle;
         use crate::vm::HeapObject;
         use std::sync::{Arc, Mutex};
-        use tokio::sync::Mutex;
 
         let (mut vm, _tx) = VM::new(vec![OpCode::Return], None);
         let (sender, receiver) = mpsc::channel(1);
@@ -544,7 +545,6 @@ mod tests {
 
         let (actor_sender, _actor_mailbox) = mpsc::channel(1);
         let task = tokio::spawn(async { Ok(()) });
-        let (mailbox_sender, mailbox) = mpsc::channel(1);
         let final_stack = Arc::new(Mutex::new(Vec::new()));
         let actor_vm = ProcessHandle::new(
             1,
@@ -555,8 +555,6 @@ mod tests {
             Vec::new(),
             false,
             task,
-            mailbox,
-            mailbox_sender,
             final_stack,
         );
         let actor_addr = vm
