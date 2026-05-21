@@ -309,12 +309,46 @@ impl VM {
         self.trap_exits
     }
 
+    pub fn set_strategy(&mut self, strategy: usize) {
+        let strategy = SupervisorStrategy::from_usize(strategy);
+        self.supervisor_state.set_strategy(strategy);
+        log::info!("Set supervisor strategy to {:?}", strategy);
+    }
+
+    pub fn strategy(&self) -> SupervisorStrategy {
+        self.supervisor_state.strategy()
+    }
+
+    pub fn supervised_children(&self) -> &[ChildSpec] {
+        self.supervisor_state.children()
+    }
+
+    pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
+        self.supervisor_state.restart_targets(child)
+    }
+
+    pub fn restart_child(&mut self, child_ref: usize) {
+        self.supervisor_state.ensure_child(ChildSpec {
+            reference: child_ref,
+            start_ip: 0,
+        });
+        log::info!("Registered child {} for restart", child_ref);
+    }
+
+    pub fn reset_for_restart(&mut self, start_ip: usize) {
+        let bytecode = self.execution.bytecode.clone();
+        let debug_info = self.execution.debug_info.clone();
+        let (_tx, rx) = mpsc::channel(100);
+        self.execution = ExecutionContext::with_mailbox_and_debug(bytecode, rx, debug_info);
+        self.execution.ip = start_ip;
+    }
+
     pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
         self.execution.mailbox_mut()
     }
 
     pub fn bytecode(&self) -> Vec<OpCode> {
-        self.execution.bytecode.clone()
+        self.execution.bytecode.opcodes()
     }
 
     pub fn debug_info(&self) -> Option<DebugInfo> {

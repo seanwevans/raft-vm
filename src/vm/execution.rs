@@ -53,8 +53,6 @@ impl ExecutionContext {
     }
 
     pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
-        let bytecode = Self::decode_bytecode(bytecode);
-
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
