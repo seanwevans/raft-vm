@@ -131,3 +131,55 @@ async fn supervisor_restart_child_uses_one_for_all_strategy() {
         other => panic!("expected second actor, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn spawn_opcodes_allocate_one_process_id_each() {
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+    let mut heap = Heap::new();
+
+    OpCode::SpawnSupervisor(0)
+        .execute(&mut execution, &mut heap)
+        .expect("spawn supervisor should succeed");
+    let supervisor_addr = match execution.stack.pop() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("expected supervisor reference, got {other:?}"),
+    };
+
+    let supervisor_pid = match heap.get(supervisor_addr).expect("supervisor should exist") {
+        HeapObject::Supervisor(handle, _, _) => handle.process_id(),
+        other => panic!("expected supervisor, got {other:?}"),
+    };
+
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap)
+        .expect("spawn first actor should succeed");
+    let first_actor_addr = match execution.stack.pop() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("expected actor reference, got {other:?}"),
+    };
+    let first_actor_pid = match heap
+        .get(first_actor_addr)
+        .expect("first actor should exist")
+    {
+        HeapObject::Actor(handle, _, _) => handle.process_id(),
+        other => panic!("expected actor, got {other:?}"),
+    };
+
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap)
+        .expect("spawn second actor should succeed");
+    let second_actor_addr = match execution.stack.pop() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("expected actor reference, got {other:?}"),
+    };
+    let second_actor_pid = match heap
+        .get(second_actor_addr)
+        .expect("second actor should exist")
+    {
+        HeapObject::Actor(handle, _, _) => handle.process_id(),
+        other => panic!("expected actor, got {other:?}"),
+    };
+
+    assert_eq!(first_actor_pid, supervisor_pid + 1);
+    assert_eq!(second_actor_pid, first_actor_pid + 1);
+}
