@@ -222,98 +222,56 @@ impl Heap {
     }
 
     pub fn collect_garbage(&mut self) {
-        let before = self.live_count();
-        let live = self.trace_live_objects();
-        self.sweep_unmarked(&live);
-        let collected = before - self.live_count();
-        if collected > 0 {
-            log::info!("Collected {} unreachable heap objects", collected);
+        let mut reclaimed = 0usize;
+        for address in 0..self.objects.len() {
+            if self.try_release(address) {
+                reclaimed += 1;
+            }
+        }
+        if reclaimed > 0 {
+            log::info!("Reclaimed {} zero-ref heap objects", reclaimed);
         }
     }
 
-    fn live_count(&self) -> usize {
-        self.objects
-            .iter()
-            .filter(|object| object.is_some())
-            .count()
-    }
-
-    fn trace_live_objects(&self) -> Vec<bool> {
-        let internal_references = self.internal_reference_counts();
-        let mut live = vec![false; self.objects.len()];
-        let mut worklist = Vec::new();
-
-        for (address, object) in self.objects.iter().enumerate() {
-            let Some(object) = object else {
-                continue;
-            };
-
-            let ref_count = object.ref_count();
-            if ref_count > internal_references[address] {
-                live[address] = true;
-                worklist.push(address);
-            }
-        }
-
-        while let Some(address) = worklist.pop() {
-            let Some(object) = self.get(address) else {
-                continue;
-            };
-
-            for referenced_address in object.references() {
-                if referenced_address < live.len()
-                    && self.objects[referenced_address].is_some()
-                    && !live[referenced_address]
-                {
-                    live[referenced_address] = true;
-                    worklist.push(referenced_address);
-                }
-            }
-        }
-
-        live
-    }
-
-    fn internal_reference_counts(&self) -> Vec<usize> {
-        let mut counts = vec![0; self.objects.len()];
-        for object in self.objects.iter().flatten() {
-            for referenced_address in object.references() {
-                if let Some(count) = counts.get_mut(referenced_address) {
-                    *count += 1;
-                }
-            }
-        }
-        counts
-    }
-
-    fn sweep_unmarked(&mut self, live: &[bool]) {
-        let mut references_to_release = Vec::new();
-        let mut addresses_to_free = Vec::new();
-
-        for (address, object) in self.objects.iter().enumerate() {
-            let Some(object) = object else {
-                continue;
-            };
-
-            if !live.get(address).copied().unwrap_or(false) {
-                references_to_release.extend(object.references().into_iter().filter(
-                    |referenced_address| live.get(*referenced_address).copied().unwrap_or(false),
-                ));
-                addresses_to_free.push(address);
-            }
-        }
-
-        for referenced_address in references_to_release {
-            if let Some(object) = self.get_mut(referenced_address) {
+    pub fn release_reference(&mut self, address: usize) -> Result<(), VmError> {
+        let child_references = match self.get_mut(address) {
+            Some(object) => {
+                let refs = if object.ref_count() == 1 {
+                    object.references()
+                } else {
+                    Vec::new()
+                };
                 object.decrement_ref();
+                refs
             }
+            None => return Err(VmError::InvalidReference),
+        };
+
+        for child in child_references {
+            self.release_reference(child)?;
+        }
+        let _ = self.try_release(address);
+        Ok(())
+    }
+
+    fn try_release(&mut self, address: usize) -> bool {
+        let should_release = matches!(self.objects.get(address), Some(Some(object)) if object.ref_count() == 0);
+        if !should_release {
+            return false;
         }
 
-        for address in addresses_to_free {
-            if self.objects[address].take().is_some() {
-                self.free_list.push(address);
-            }
+        let child_references = self
+            .objects
+            .get(address)
+            .and_then(|object| object.as_ref())
+            .map(|object| object.references())
+            .unwrap_or_default();
+        self.objects[address] = None;
+        self.free_list.push(address);
+        for child in child_references {
+            let _ = self.release_reference(child);
         }
+        true
     }
 }
 

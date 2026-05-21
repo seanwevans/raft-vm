@@ -60,7 +60,7 @@ fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
 
     for value in child_references {
         if let Value::Reference(child_address) = value {
-            decrement_reference(heap, child_address)?;
+            heap.release_reference(child_address)?;
         }
     }
 
@@ -177,7 +177,7 @@ fn push_value(
 fn pop_value(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<Value, VmError> {
     if let Some(value) = execution.stack.pop() {
         if let Value::Reference(address) = value {
-            decrement_reference(heap, address)?;
+            heap.release_reference(address)?;
         }
         Ok(value)
     } else {
@@ -201,7 +201,7 @@ fn retain_value(heap: &mut Heap, value: Value) -> Result<(), VmError> {
 
 fn release_value(heap: &mut Heap, value: Value) -> Result<(), VmError> {
     if let Value::Reference(address) = value {
-        decrement_reference(heap, address)?;
+        heap.release_reference(address)?;
     }
     Ok(())
 }
@@ -811,7 +811,7 @@ impl OpCode {
                 let value = pop_value(execution, heap)?;
 
                 if let Some(Value::Reference(address)) = execution.locals.insert(*index, value) {
-                    decrement_reference(heap, address)?;
+                    heap.release_reference(address)?;
                 }
 
                 if let Value::Reference(address) = value {
@@ -956,7 +956,7 @@ impl OpCode {
                 Ok(message) => {
                     log::info!("Received message: {:?}", message);
                     if let Value::Reference(address) = message {
-                        decrement_reference(heap, address)?;
+                        heap.release_reference(address)?;
                     }
                     push_value(execution, heap, message)
                 }

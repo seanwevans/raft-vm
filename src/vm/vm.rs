@@ -228,8 +228,7 @@ impl VM {
 
     fn decrement_reference(&mut self, address: usize) -> Result<(), VmError> {
         if let Some(object) = self.heap.get_mut(address) {
-            object.decrement_ref();
-            Ok(())
+            self.heap.release_reference(address)
         } else {
             Err(VmError::InvalidReference)
         }
