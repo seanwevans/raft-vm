@@ -27,3 +27,19 @@ fn push_const_uses_constant_pool_operand() {
         OpCode::PushConst(Value::Integer(42))
     ));
 }
+
+#[test]
+fn array_and_string_adjacent_opcodes_round_trip() {
+    let bytecode = Bytecode::new(vec![
+        OpCode::ArrayGet,
+        OpCode::ArraySet,
+        OpCode::MakeString("hello".to_string()),
+    ]);
+
+    assert!(matches!(bytecode.decode(0).unwrap(), OpCode::ArrayGet));
+    assert!(matches!(bytecode.decode(1).unwrap(), OpCode::ArraySet));
+    assert!(matches!(
+        bytecode.decode(2).unwrap(),
+        OpCode::MakeString(value) if value == "hello"
+    ));
+}
