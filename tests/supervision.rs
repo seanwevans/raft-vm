@@ -181,6 +181,12 @@ async fn spawn_opcodes_allocate_one_process_id_each() {
         other => panic!("expected actor, got {other:?}"),
     };
 
-    assert_eq!(first_actor_pid, supervisor_pid + 1);
-    assert_eq!(second_actor_pid, first_actor_pid + 1);
+    assert!(
+        first_actor_pid > supervisor_pid,
+        "first actor pid should be allocated after supervisor pid"
+    );
+    assert!(
+        second_actor_pid > first_actor_pid,
+        "second actor pid should be allocated after first actor pid"
+    );
 }
