@@ -150,10 +150,7 @@ fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
             }
             *sender = replacement_tx.clone();
             let final_stack = Arc::new(Mutex::new(Vec::new()));
-            process.replace_runtime(
-                run_process(vm, final_stack.clone()),
-                child.start_ip,
-            );
+            process.replace_runtime(run_process(vm, final_stack.clone()), child.start_ip);
             log::info!(
                 "Restarted actor {} at ip {}",
                 child.reference,
@@ -466,7 +463,10 @@ impl Bytecode {
     }
 
     pub fn opcodes(&self) -> Vec<OpCode> {
-        self.opcodes.iter().map(|opcode| opcode.as_ref().clone()).collect()
+        self.opcodes
+            .iter()
+            .map(|opcode| opcode.as_ref().clone())
+            .collect()
     }
 }
 

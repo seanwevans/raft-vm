@@ -121,11 +121,7 @@ impl ProcessHandle {
         self.trap_exits
     }
 
-    pub fn replace_runtime(
-        &mut self,
-        task: JoinHandle<Result<(), VmError>>,
-        start_ip: usize,
-    ) {
+    pub fn replace_runtime(&mut self, task: JoinHandle<Result<(), VmError>>, start_ip: usize) {
         if let Some(task) = &self.task {
             task.abort();
         }
@@ -249,7 +245,9 @@ impl Heap {
             let Some(object) = self.objects[address].as_ref() else {
                 continue;
             };
-            let external_incoming = object.ref_count().saturating_sub(internal_incoming[address]);
+            let external_incoming = object
+                .ref_count()
+                .saturating_sub(internal_incoming[address]);
             if external_incoming > 0 {
                 reachable[address] = true;
                 worklist.push_back(address);
