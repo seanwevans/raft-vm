@@ -25,6 +25,10 @@ pub struct NativeFunction {
 }
 
 #[derive(Debug)]
+/// While a process is running, the only way to communicate with it from outside is via the
+/// `Sender<Value>` stored alongside the handle in `HeapObject::Actor`. The handle itself
+/// exposes no live mailbox view; the running VM owns it. Post-mortem state is available via
+/// `pop_stack` once `run` has been awaited.
 pub struct ProcessHandle {
     process_id: usize,
     parent: Option<usize>,
@@ -103,10 +107,6 @@ impl ProcessHandle {
 
     pub fn bytecode(&self) -> Vec<OpCode> {
         self.bytecode.clone()
-    }
-
-    pub fn heap_references(&self) -> Vec<usize> {
-        Vec::new()
     }
 
     pub fn debug_info(&self) -> Option<DebugInfo> {
