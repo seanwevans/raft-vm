@@ -24,6 +24,29 @@ pub struct NativeFunction {
     pub function: fn(Vec<Value>) -> Result<Value, VmError>,
 }
 
+/// A handle to a process spawned onto the Tokio runtime.
+///
+/// ### Option 3 tradeoff (current contract)
+///
+/// **Buys:** lightweight process tracking that can await task completion and
+/// inspect captured post-mortem state.
+///
+/// **Costs:** no live mailbox ownership through the handle while the process is
+/// running.
+///
+/// A `ProcessHandle` represents a process that has been spawned onto the Tokio
+/// runtime. While the process is running, its mailbox is owned by the VM inside
+/// the spawned task; the handle does not provide a way to peek at or close the
+/// mailbox in-flight. To send messages, use the `Sender<Value>` stored
+/// alongside the handle in `HeapObject::Actor`.
+///
+/// To inspect a process post-mortem, await [`ProcessHandle::run`] (which awaits
+/// the underlying `JoinHandle`) and then read [`ProcessHandle::pop_stack`] or
+/// [`ProcessHandle::heap_references`] from the captured `final_stack`.
+///
+/// This makes the limitation explicit and gives Phase 1 a clear target:
+/// introduce a proper `Process` type that is not moved into a Tokio task and
+/// can therefore provide live mailbox access.
 #[derive(Debug)]
 /// While a process is running, the only way to communicate with it from outside is via the
 /// `Sender<Value>` stored alongside the handle in `HeapObject::Actor`. The handle itself
