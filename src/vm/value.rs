@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::supervision::ExitSignal;
 use log;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Integer(i32),
     Float(f64),
@@ -29,7 +29,7 @@ pub enum MessageValue {
 #[allow(clippy::should_implement_trait)]
 impl Value {
     pub fn checked_add(self, other: Value) -> Result<Value, VmError> {
-        match (self, other) {
+        match (self.clone(), other.clone()) {
             (Value::Integer(a), Value::Integer(b)) => i32::checked_add(a, b)
                 .map(Value::Integer)
                 .ok_or(VmError::IntegerOverflow),
@@ -39,7 +39,7 @@ impl Value {
     }
 
     pub fn checked_sub(self, other: Value) -> Result<Value, VmError> {
-        match (self, other) {
+        match (self.clone(), other.clone()) {
             (Value::Integer(a), Value::Integer(b)) => i32::checked_sub(a, b)
                 .map(Value::Integer)
                 .ok_or(VmError::IntegerOverflow),
@@ -49,7 +49,7 @@ impl Value {
     }
 
     pub fn checked_mul(self, other: Value) -> Result<Value, VmError> {
-        match (self, other) {
+        match (self.clone(), other.clone()) {
             (Value::Integer(a), Value::Integer(b)) => i32::checked_mul(a, b)
                 .map(Value::Integer)
                 .ok_or(VmError::IntegerOverflow),
@@ -59,7 +59,7 @@ impl Value {
     }
 
     pub fn checked_div(self, other: Value) -> Result<Value, VmError> {
-        match (self, other) {
+        match (self.clone(), other.clone()) {
             (Value::Integer(a), Value::Integer(b)) => {
                 if b == 0 {
                     log::error!("Division by zero: {}/{}", a, b);

@@ -70,7 +70,7 @@ async fn supervisor_restart_child_uses_one_for_all_strategy() {
     OpCode::SpawnSupervisor(0)
         .execute(&mut execution, &mut heap)
         .expect("spawn supervisor should succeed");
-    let supervisor_addr = match execution.stack.last().copied() {
+    let supervisor_addr = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("expected supervisor reference, got {other:?}"),
     };

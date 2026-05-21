@@ -263,7 +263,7 @@ async fn spawn_send_and_receive_message_via_actor_handle() {
     OpCode::SpawnActor(0)
         .execute(&mut execution, &mut heap)
         .expect("spawn actor should succeed");
-    let actor_addr = match execution.stack.last().copied() {
+    let actor_addr = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("expected actor reference in stack, got {other:?}"),
     };
@@ -328,7 +328,7 @@ async fn native_io_print_is_available_from_standard_library() {
 
     vm.run().await.expect("native io.print should run");
 
-    assert_eq!(vm.stack().last().copied(), Some(Value::Null));
+    assert_eq!(vm.stack().last().cloned(), Some(Value::Null));
 }
 
 #[tokio::test]
