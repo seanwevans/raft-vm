@@ -39,7 +39,6 @@ pub struct ExecutionContext {
     pub stack: Vec<Value>,
     pub locals: HashMap<usize, Value>,
     pub globals: HashMap<String, Value>,
-    mailbox: Receiver<Value>,
     pub ip: usize,
     pub call_stack: Vec<usize>,
     pub bytecode: Bytecode,
@@ -60,7 +59,6 @@ impl ExecutionContext {
             stack: Vec::new(),
             locals: HashMap::new(),
             globals: HashMap::new(),
-            mailbox,
             ip: 0,
             call_stack: Vec::new(),
             bytecode: bytecode.into(),
@@ -83,7 +81,6 @@ impl ExecutionContext {
             stack: Vec::new(),
             locals: HashMap::new(),
             globals: HashMap::new(),
-            mailbox,
             ip: 0,
             call_stack: Vec::new(),
             bytecode: bytecode.into(),
@@ -182,7 +179,4 @@ impl ExecutionContext {
         &mut self.globals
     }
 
-    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
-        &mut self.mailbox
-    }
 }
