@@ -80,12 +80,7 @@ impl VM {
         match self.execution.stack.pop() {
             Some(value) => {
                 if let Value::Reference(address) = value {
-                    if let Some(object) = self.heap.get_mut(address) {
-                        object.decrement_ref();
-                    } else {
-                        log::error!("Attempted to pop invalid heap reference: {}", address);
-                        return Err(VmError::InvalidReference);
-                    }
+                    self.heap.release_reference(address)?;
                 }
                 Ok(value)
             }
