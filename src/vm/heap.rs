@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::value::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
 use crate::compiler::DebugInfo;
@@ -36,8 +36,6 @@ pub struct ProcessHandle {
     trap_exits: bool,
     supervisor_state: SupervisorState,
     task: Option<JoinHandle<Result<(), VmError>>>,
-    mailbox: Receiver<Value>,
-    mailbox_sender: Sender<Value>,
     final_stack: Arc<Mutex<Vec<Value>>>,
 }
 
@@ -66,8 +64,6 @@ impl ProcessHandle {
         links: Vec<Sender<Value>>,
         trap_exits: bool,
         task: JoinHandle<Result<(), VmError>>,
-        mailbox: Receiver<Value>,
-        mailbox_sender: Sender<Value>,
         final_stack: Arc<Mutex<Vec<Value>>>,
     ) -> Self {
         Self {
@@ -81,8 +77,6 @@ impl ProcessHandle {
             trap_exits,
             supervisor_state: SupervisorState::default(),
             task: Some(task),
-            mailbox,
-            mailbox_sender,
             final_stack,
         }
     }
@@ -127,21 +121,13 @@ impl ProcessHandle {
         self.trap_exits
     }
 
-    pub fn replace_runtime(
-        &mut self,
-        task: JoinHandle<Result<(), VmError>>,
-        start_ip: usize,
-        mailbox: Receiver<Value>,
-        mailbox_sender: Sender<Value>,
-    ) {
+    pub fn replace_runtime(&mut self, task: JoinHandle<Result<(), VmError>>, start_ip: usize) {
         if let Some(task) = &self.task {
             task.abort();
         }
         self.task = Some(task);
         self.start_ip = start_ip;
         self.current_ip = start_ip;
-        self.mailbox = mailbox;
-        self.mailbox_sender = mailbox_sender;
     }
 
     pub async fn run(&mut self) -> Result<(), VmError> {
@@ -161,18 +147,6 @@ impl ProcessHandle {
             .map_err(|err| VmError::Message(err.to_string()))?
             .pop()
             .ok_or(VmError::StackUnderflow)
-    }
-
-    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
-        &mut self.mailbox
-    }
-
-    pub fn is_mailbox_closed(&self) -> bool {
-        self.mailbox.is_closed()
-    }
-
-    pub fn mailbox_sender(&self) -> Sender<Value> {
-        self.mailbox_sender.clone()
     }
 
     pub fn heap_references(&self) -> Vec<usize> {
@@ -271,7 +245,9 @@ impl Heap {
             let Some(object) = self.objects[address].as_ref() else {
                 continue;
             };
-            let external_incoming = object.ref_count().saturating_sub(internal_incoming[address]);
+            let external_incoming = object
+                .ref_count()
+                .saturating_sub(internal_incoming[address]);
             if external_incoming > 0 {
                 reachable[address] = true;
                 worklist.push_back(address);

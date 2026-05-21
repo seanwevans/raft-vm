@@ -117,7 +117,6 @@ fn spawn_child_vm(
         let debug_info = vm.debug_info();
         let links = vm.links();
         let trap_exits = vm.trap_exits();
-        let mailbox = vm.take_mailbox();
         let final_stack = Arc::new(Mutex::new(Vec::new()));
         let task = run_process(vm, final_stack.clone());
         ProcessHandle::new(
@@ -129,8 +128,6 @@ fn spawn_child_vm(
             links,
             trap_exits,
             task,
-            mailbox,
-            tx.clone(),
             final_stack,
         )
     };
@@ -151,15 +148,9 @@ fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
             for link in process.links() {
                 vm.link(link);
             }
-            let replacement_mailbox = vm.take_mailbox();
             *sender = replacement_tx.clone();
             let final_stack = Arc::new(Mutex::new(Vec::new()));
-            process.replace_runtime(
-                run_process(vm, final_stack.clone()),
-                child.start_ip,
-                replacement_mailbox,
-                replacement_tx,
-            );
+            process.replace_runtime(run_process(vm, final_stack.clone()), child.start_ip);
             log::info!(
                 "Restarted actor {} at ip {}",
                 child.reference,
@@ -472,7 +463,10 @@ impl Bytecode {
     }
 
     pub fn opcodes(&self) -> Vec<OpCode> {
-        self.opcodes.iter().map(|opcode| opcode.as_ref().clone()).collect()
+        self.opcodes
+            .iter()
+            .map(|opcode| opcode.as_ref().clone())
+            .collect()
     }
 }
 

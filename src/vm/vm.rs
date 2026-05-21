@@ -137,11 +137,6 @@ impl VM {
         self.restart_ip = ip;
     }
 
-    pub fn take_mailbox(&mut self) -> Receiver<Value> {
-        let (_tx, replacement_mailbox) = mpsc::channel(1);
-        std::mem::replace(self.execution.mailbox_mut(), replacement_mailbox)
-    }
-
     pub async fn run(&mut self) -> Result<(), VmError> {
         if self.execution.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
