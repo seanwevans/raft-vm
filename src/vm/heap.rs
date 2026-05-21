@@ -26,14 +26,6 @@ pub struct NativeFunction {
 
 /// A handle to a process spawned onto the Tokio runtime.
 ///
-/// ### Option 3 tradeoff (current contract)
-///
-/// **Buys:** lightweight process tracking that can await task completion and
-/// inspect captured post-mortem state.
-///
-/// **Costs:** no live mailbox ownership through the handle while the process is
-/// running.
-///
 /// A `ProcessHandle` represents a process that has been spawned onto the Tokio
 /// runtime. While the process is running, its mailbox is owned by the VM inside
 /// the spawned task; the handle does not provide a way to peek at or close the
