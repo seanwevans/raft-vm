@@ -1,6 +1,8 @@
 use raft::vm::execution::ExecutionContext;
-use raft::vm::heap::{Heap, HeapObject};
+use raft::vm::heap::{Heap, HeapObject, ProcessHandle};
 use raft::vm::{error::VmError, opcodes::OpCode, value::Value, vm::VM};
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::channel;
 
 #[tokio::test]
 async fn division_by_zero_returns_error() {
@@ -183,14 +185,27 @@ async fn spawn_supervisor_at_bytecode_len_returns_error() {
 async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
-    // Stack layout expected by SendMessage is [message, actor_ref].
-    OpCode::SpawnActor(0)
-        .execute(&mut execution, &mut heap)
-        .expect("spawn actor should succeed");
-    let actor_addr = match execution.stack.last().copied() {
-        Some(Value::Reference(addr)) => addr,
-        other => panic!("expected actor reference, got {other:?}"),
-    };
+
+    let (dead_sender, dead_receiver) = channel::<Value>(1);
+    drop(dead_receiver);
+    let (_mailbox_sender, mailbox) = channel::<Value>(1);
+    let final_stack = Arc::new(Mutex::new(Vec::new()));
+    let task = tokio::spawn(async { Ok(()) });
+    let handle = ProcessHandle::new(
+        1,
+        None,
+        0,
+        Vec::new(),
+        None,
+        Vec::new(),
+        false,
+        task,
+        mailbox,
+        dead_sender.clone(),
+        final_stack,
+    );
+    let actor_addr = heap.allocate(HeapObject::Actor(handle, dead_sender, 1));
+    execution.stack.push(Value::Reference(actor_addr));
 
     let message_addr = heap.allocate(HeapObject::Array(vec![], 0));
     OpCode::PushConst(Value::Reference(message_addr))
@@ -200,18 +215,9 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
         .execute(&mut execution, &mut heap)
         .expect("swap should succeed");
 
-    // Close actor mailbox to force ChannelSend error.
-    let actor_entry = heap
-        .get_mut(actor_addr)
-        .expect("spawned actor should be in heap");
-    match actor_entry {
-        HeapObject::Actor(actor_vm, _, _) => actor_vm.mailbox_mut().close(),
-        other => panic!("expected actor in heap, got {other:?}"),
-    }
-
     let err = OpCode::SendMessage
         .execute(&mut execution, &mut heap)
-        .expect_err("send should fail when mailbox is closed");
+        .expect_err("send should fail when mailbox receiver is dropped");
 
     match err {
         VmError::ChannelSend { value, .. } => {
