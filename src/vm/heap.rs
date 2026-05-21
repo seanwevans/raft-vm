@@ -170,6 +170,21 @@ impl ProcessHandle {
         self.mailbox_sender.clone()
     }
 
+    pub fn heap_references(&self) -> Vec<usize> {
+        self.final_stack
+            .lock()
+            .map(|stack| {
+                stack
+                    .iter()
+                    .filter_map(|value| match value {
+                        Value::Reference(address) => Some(*address),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn set_strategy(&mut self, strategy: usize) {
         let strategy = SupervisorStrategy::from_usize(strategy);
         self.supervisor_state.set_strategy(strategy);
@@ -359,6 +374,7 @@ impl HeapObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn gc_preserves_objects_reachable_from_live_actor_vm_stack() {
@@ -367,9 +383,22 @@ mod tests {
         let array_address =
             heap.allocate(HeapObject::Array(vec![Value::Reference(string_address)], 0));
 
-        let (mut actor_vm, actor_sender) = VM::new(Vec::new(), None);
-        actor_vm.push_stack_value_for_test(Value::Reference(array_address));
-        let actor_address = heap.allocate(HeapObject::Actor(actor_vm, actor_sender, 1));
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let (actor_sender, _actor_mailbox) = tokio::sync::mpsc::channel(1);
+        let final_stack = Arc::new(Mutex::new(vec![Value::Reference(array_address)]));
+        let task = runtime.spawn(async { Ok(()) });
+        let actor = ProcessHandle::new(
+            1,
+            None,
+            0,
+            Vec::new(),
+            None,
+            Vec::new(),
+            false,
+            task,
+            final_stack,
+        );
+        let actor_address = heap.allocate(HeapObject::Actor(actor, actor_sender, 1));
 
         heap.collect_garbage();
 
