@@ -599,14 +599,10 @@ impl OpCode {
                 Ok(())
             }
             OpCode::StoreVar(index) => {
-                let value = pop_value(execution, heap)?;
+                let value = pop_raw_value(execution)?;
 
-                if let Some(Value::Reference(address)) = execution.locals.insert(*index, value) {
-                    heap.release_reference(address)?;
-                }
-
-                if let Value::Reference(address) = value {
-                    increment_reference(heap, address)?;
+                if let Some(previous) = execution.locals.insert(*index, value) {
+                    release_value(heap, previous)?;
                 }
 
                 Ok(())
@@ -1012,5 +1008,36 @@ mod heap_opcode_tests {
             .execute(&mut execution, &mut heap)
             .unwrap();
         assert_eq!(execution.stack.pop(), Some(Value::Integer(5)));
+    }
+
+    #[tokio::test]
+    async fn store_var_preserves_child_reference_counts() {
+        let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+        let mut heap = Heap::new();
+
+        OpCode::MakeString("child".to_string())
+            .execute(&mut execution, &mut heap)
+            .unwrap();
+        let child_address = match execution.stack.last().copied() {
+            Some(Value::Reference(address)) => address,
+            other => panic!("expected child string reference on stack, got {other:?}"),
+        };
+
+        OpCode::MakeArray(1).execute(&mut execution, &mut heap).unwrap();
+        let parent_address = match execution.stack.last().copied() {
+            Some(Value::Reference(address)) => address,
+            other => panic!("expected parent array reference on stack, got {other:?}"),
+        };
+
+        OpCode::StoreVar(0).execute(&mut execution, &mut heap).unwrap();
+
+        match heap.get(parent_address) {
+            Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 1, "stored parent should be retained"),
+            other => panic!("expected stored parent array in heap, got {other:?}"),
+        }
+        match heap.get(child_address) {
+            Some(HeapObject::String(_, rc)) => assert_eq!(*rc, 1, "child should remain retained by parent"),
+            other => panic!("expected child string in heap, got {other:?}"),
+        }
     }
 }
