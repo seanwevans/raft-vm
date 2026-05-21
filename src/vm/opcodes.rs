@@ -794,12 +794,13 @@ impl OpCode {
                             push_existing_value(execution, Value::Reference(address));
                             Ok(())
                         }
-                        Err(TrySendError::Full(message)) => {
+                        Err(TrySendError::Full(message_for_channel)) => {
+                            release_value(heap, message)?;
                             release_value(heap, actor_ref)?;
                             return Ok(ExecutionState::Yield(BlockingOperation::SendMessage {
                                 sender,
                                 actor_address: address,
-                                message,
+                                message: message_for_channel,
                             }));
                         }
                         Err(TrySendError::Closed(message_for_channel)) => {

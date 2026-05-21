@@ -1,8 +1,10 @@
 use raft::vm::execution::ExecutionContext;
-use raft::vm::heap::{Heap, HeapObject};
+use raft::vm::heap::{Heap, HeapObject, ProcessHandle};
 use raft::vm::opcodes::OpCode;
 use raft::vm::value::{MessageValue, Value};
 use raft::vm::vm::VM;
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::channel;
 
 fn actor_ref_count(heap: &Heap, address: usize) -> usize {
@@ -137,6 +139,54 @@ async fn vm_pop_stack_drops_actor_reference() {
         vm.heap_ref_count(actor_addr).is_none(),
         "actor should be collected after reference count reaches zero"
     );
+}
+
+#[tokio::test]
+async fn send_message_full_releases_reference_message_before_yield() {
+    let (_self_tx, mailbox) = channel(1);
+    let mut heap = Heap::new();
+    let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], mailbox);
+
+    let (actor_sender, mut actor_mailbox) = mpsc::channel(1);
+    actor_sender
+        .send(MessageValue::Null)
+        .await
+        .expect("prefill actor mailbox to force TrySendError::Full");
+    let task = tokio::spawn(async { Ok(()) });
+    let final_stack = Arc::new(Mutex::new(Vec::new()));
+    let actor = ProcessHandle::new(
+        1,
+        None,
+        0,
+        vec![OpCode::Return],
+        None,
+        Vec::new(),
+        false,
+        task,
+        final_stack,
+    );
+    let actor_addr = heap.allocate(HeapObject::Actor(actor, actor_sender, 0));
+
+    let message_addr = heap.allocate(HeapObject::Array(vec![], 0));
+    OpCode::PushConst(Value::Reference(message_addr))
+        .execute(&mut execution, &mut heap)
+        .unwrap();
+    OpCode::PushConst(Value::Reference(actor_addr))
+        .execute(&mut execution, &mut heap)
+        .unwrap();
+
+    let state = OpCode::SendMessage.execute(&mut execution, &mut heap).unwrap();
+    assert!(
+        matches!(state, raft::vm::execution::ExecutionState::Yield(_)),
+        "expected SendMessage to yield when channel is full"
+    );
+
+    match heap.get(message_addr) {
+        Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 0, "message ref leaked on Full"),
+        other => panic!("expected message array, got {other:?}"),
+    }
+
+    let _ = actor_mailbox.recv().await;
 }
 
 #[tokio::test]
