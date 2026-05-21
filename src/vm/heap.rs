@@ -111,10 +111,6 @@ impl ProcessHandle {
         self.bytecode.clone()
     }
 
-    pub fn heap_references(&self) -> Vec<usize> {
-        Vec::new()
-    }
-
     pub fn debug_info(&self) -> Option<DebugInfo> {
         self.debug_info.clone()
     }
@@ -175,6 +171,10 @@ impl ProcessHandle {
         self.mailbox_sender.clone()
     }
 
+    /// Returns heap references observed in the process's `final_stack` snapshot.
+    ///
+    /// Known limitation (option 3): this only captures references once the task
+    /// has completed and written its final stack, so in-flight references are not visible.
     pub fn heap_references(&self) -> Vec<usize> {
         self.final_stack
             .lock()
