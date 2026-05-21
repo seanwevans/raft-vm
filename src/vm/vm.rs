@@ -542,14 +542,6 @@ mod tests {
         let actor_addr = vm
             .heap
             .allocate(HeapObject::Actor(actor_vm, actor_sender, 0));
-        let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
-
-        if let Some(HeapObject::Array(_, rc)) = vm.heap.get_mut(message_addr) {
-            *rc = 1;
-        } else {
-            panic!("Expected message array");
-        }
-
         let err = vm
             .await_blocking_operation(BlockingOperation::SendMessage {
                 sender,
@@ -575,11 +567,6 @@ mod tests {
             vm.heap_ref_count(actor_addr),
             Some(1),
             "actor reference count should stay on stack after blocking send failure",
-        );
-        assert_eq!(
-            vm.heap_ref_count(message_addr),
-            Some(0),
-            "blocking send failure should release retained message reference",
         );
     }
 }

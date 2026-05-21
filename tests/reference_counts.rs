@@ -1,7 +1,7 @@
 use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject};
 use raft::vm::opcodes::OpCode;
-use raft::vm::value::Value;
+use raft::vm::value::{MessageValue, Value};
 use raft::vm::vm::VM;
 use tokio::sync::mpsc::channel;
 
@@ -47,7 +47,7 @@ async fn send_and_receive_message_updates_reference_counts() {
     let mut heap = Heap::new();
     let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], mailbox);
 
-    // Spawn target actor (A) and message actor (B)
+    // Spawn target actor (A) and message array (M)
     OpCode::SpawnActor(0)
         .execute(&mut execution, &mut heap)
         .unwrap();
@@ -56,13 +56,11 @@ async fn send_and_receive_message_updates_reference_counts() {
         _ => panic!("Expected actor reference for target"),
     };
 
-    OpCode::SpawnActor(0)
+    let message_addr = heap.allocate(HeapObject::Array(vec![], 0));
+    OpCode::PushConst(Value::Reference(message_addr))
         .execute(&mut execution, &mut heap)
         .unwrap();
-    let actor_b = match execution.stack.last().copied() {
-        Some(Value::Reference(addr)) => addr,
-        _ => panic!("Expected actor reference for message"),
-    };
+    let message_ref = message_addr;
 
     OpCode::Swap.execute(&mut execution, &mut heap).unwrap();
 
@@ -71,17 +69,23 @@ async fn send_and_receive_message_updates_reference_counts() {
         .unwrap();
 
     assert_eq!(actor_ref_count(&heap, actor_a), 1, "actor on stack");
-    assert_eq!(actor_ref_count(&heap, actor_b), 1, "message queued");
+    match heap.get(message_ref) {
+        Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 1, "message queued"),
+        other => panic!("expected message array, got {other:?}"),
+    }
 
     // Drop both stack references and collect.
     OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     assert_eq!(actor_ref_count(&heap, actor_a), 0);
-    assert_eq!(actor_ref_count(&heap, actor_b), 0);
+    match heap.get(message_ref) {
+        Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 0),
+        other => panic!("expected message array, got {other:?}"),
+    }
 
     heap.collect_garbage();
     assert!(heap.get(actor_a).is_none());
-    assert!(heap.get(actor_b).is_none());
+    assert!(heap.get(message_ref).is_none());
 }
 
 #[tokio::test]
@@ -90,8 +94,7 @@ async fn receive_message_updates_reference_counts() {
     let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], mailbox);
     let mut heap = Heap::new();
 
-    let message_addr = heap.allocate(HeapObject::Array(vec![], 1));
-    tx.send(Value::Reference(message_addr))
+    tx.send(MessageValue::Array(vec![]))
         .await
         .expect("sending message into mailbox should succeed");
 
@@ -99,10 +102,13 @@ async fn receive_message_updates_reference_counts() {
         .execute(&mut execution, &mut heap)
         .expect("ReceiveMessage should push message onto stack");
 
-    assert_eq!(execution.stack, vec![Value::Reference(message_addr)]);
+    let message_addr = match execution.stack.as_slice() {
+        [Value::Reference(addr)] => *addr,
+        other => panic!("expected a single message reference on stack, got {other:?}"),
+    };
     match heap
         .get(message_addr)
-        .expect("message object should still be allocated")
+        .expect("message object should be allocated")
     {
         HeapObject::Array(_, rc) => assert_eq!(*rc, 2, "message should be retained on stack"),
         other => panic!("expected array at message_addr, got {other:?}"),

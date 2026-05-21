@@ -1,6 +1,6 @@
 use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject, ProcessHandle};
-use raft::vm::{error::VmError, opcodes::OpCode, value::Value, vm::VM};
+use raft::vm::{error::VmError, opcodes::OpCode, value::{MessageValue, Value}, vm::VM};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::channel;
 
@@ -186,7 +186,7 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
     let mut execution = ExecutionContext::new(vec![OpCode::Return]);
     let mut heap = Heap::new();
 
-    let (dead_sender, dead_receiver) = channel::<Value>(1);
+    let (dead_sender, dead_receiver) = channel::<MessageValue>(1);
     drop(dead_receiver);
     let final_stack = Arc::new(Mutex::new(Vec::new()));
     let task = tokio::spawn(async { Ok(()) });
@@ -217,9 +217,13 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
         .expect_err("send should fail when mailbox receiver is dropped");
 
     match err {
-        VmError::ChannelSend { value, .. } => {
-            assert_eq!(value, Value::Reference(message_addr));
-        }
+        VmError::ChannelSend { value, .. } => match value {
+            Value::Reference(addr) => match heap.get(addr) {
+                Some(HeapObject::Array(_, _)) => {}
+                other => panic!("expected array value in ChannelSend error, got {other:?}"),
+            },
+            other => panic!("expected ChannelSend reference value, got {other:?}"),
+        },
         other => panic!("expected ChannelSend error, got {other:?}"),
     }
 
