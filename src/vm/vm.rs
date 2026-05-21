@@ -6,16 +6,32 @@ use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::opcodes::{Bytecode, OpCode};
-use crate::vm::supervision::{
-    ChildSpec, ExitReason, ExitSignal, SupervisorState, SupervisorStrategy,
-};
+use crate::vm::supervision::{ExitReason, ExitSignal};
 use crate::vm::value::Value;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
+static RECYCLED_PROCESS_IDS: LazyLock<Mutex<Vec<usize>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 const REDUCTION_QUOTA: usize = 2_000;
+
+fn allocate_process_id() -> usize {
+    if let Some(process_id) = RECYCLED_PROCESS_IDS
+        .lock()
+        .expect("recycled process id list lock poisoned")
+        .pop()
+    {
+        return process_id;
+    }
+
+    NEXT_PROCESS_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .expect("process id space exhausted and no recycled ids available")
+}
 
 #[derive(Debug)]
 pub struct VM {
@@ -28,7 +44,6 @@ pub struct VM {
     links: Vec<Sender<Value>>,
     trap_exits: bool,
     reductions: usize,
-    supervisor_state: SupervisorState,
     _supervisor: Option<Sender<usize>>,
 }
 
@@ -55,13 +70,12 @@ impl VM {
                 execution,
                 heap,
                 self_sender: tx.clone(),
-                process_id: NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed),
+                process_id: allocate_process_id(),
                 parent: None,
                 restart_ip: 0,
                 links: Vec::new(),
                 trap_exits: false,
                 reductions: 0,
-                supervisor_state: SupervisorState::default(),
                 _supervisor: supervisor,
             },
             tx,
@@ -186,7 +200,7 @@ impl VM {
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
                 if let Value::Reference(address) = message {
-                    self.decrement_reference(address)?;
+                    self.release_reference(address)?;
                 }
                 self.push_runtime_value(message)
             }
@@ -217,7 +231,7 @@ impl VM {
 
     fn release_runtime_value(&mut self, value: Value) -> Result<(), VmError> {
         if let Value::Reference(address) = value {
-            self.decrement_reference(address)?;
+            self.release_reference(address)?;
         }
         Ok(())
     }
@@ -231,8 +245,8 @@ impl VM {
         }
     }
 
-    fn decrement_reference(&mut self, address: usize) -> Result<(), VmError> {
-        if let Some(object) = self.heap.get_mut(address) {
+    fn release_reference(&mut self, address: usize) -> Result<(), VmError> {
+        if self.heap.get(address).is_some() {
             self.heap.release_reference(address)
         } else {
             Err(VmError::InvalidReference)
@@ -277,10 +291,6 @@ impl VM {
 
     pub fn sender(&self) -> Sender<Value> {
         self.self_sender.clone()
-    }
-
-    pub fn replace_sender(&mut self, sender: Sender<Value>) {
-        self.self_sender = sender;
     }
 
     pub fn link(&mut self, sender: Sender<Value>) {
@@ -360,6 +370,15 @@ impl VM {
                 log::warn!("Failed to deliver exit signal: {}", err);
             }
         }
+    }
+}
+
+impl Drop for VM {
+    fn drop(&mut self) {
+        RECYCLED_PROCESS_IDS
+            .lock()
+            .expect("recycled process id list lock poisoned")
+            .push(self.process_id);
     }
 }
 

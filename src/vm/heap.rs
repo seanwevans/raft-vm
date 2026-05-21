@@ -2,7 +2,7 @@
 
 use crate::vm::error::VmError;
 use crate::vm::value::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -66,9 +66,10 @@ impl ProcessHandle {
         links: Vec<Sender<Value>>,
         trap_exits: bool,
         task: JoinHandle<Result<(), VmError>>,
+        mailbox: Receiver<Value>,
+        mailbox_sender: Sender<Value>,
         final_stack: Arc<Mutex<Vec<Value>>>,
     ) -> Self {
-        let (mailbox_sender, mailbox) = tokio::sync::mpsc::channel(1);
         Self {
             process_id,
             parent,
@@ -174,6 +175,21 @@ impl ProcessHandle {
         self.mailbox_sender.clone()
     }
 
+    pub fn heap_references(&self) -> Vec<usize> {
+        self.final_stack
+            .lock()
+            .map(|stack| {
+                stack
+                    .iter()
+                    .filter_map(|value| match value {
+                        Value::Reference(address) => Some(*address),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn set_strategy(&mut self, strategy: usize) {
         let strategy = SupervisorStrategy::from_usize(strategy);
         self.supervisor_state.set_strategy(strategy);
@@ -234,14 +250,80 @@ impl Heap {
     }
 
     pub fn collect_garbage(&mut self) {
-        let mut reclaimed = 0usize;
-        for address in 0..self.objects.len() {
-            if self.try_release(address) {
-                reclaimed += 1;
+        let object_count = self.objects.len();
+        let mut internal_incoming = vec![0usize; object_count];
+
+        for address in 0..object_count {
+            let Some(object) = self.objects[address].as_ref() else {
+                continue;
+            };
+            for child in object.references() {
+                if child < object_count && self.objects[child].is_some() {
+                    internal_incoming[child] += 1;
+                }
             }
         }
+
+        let mut reachable = vec![false; object_count];
+        let mut worklist = VecDeque::new();
+
+        for address in 0..object_count {
+            let Some(object) = self.objects[address].as_ref() else {
+                continue;
+            };
+            let external_incoming = object.ref_count().saturating_sub(internal_incoming[address]);
+            if external_incoming > 0 {
+                reachable[address] = true;
+                worklist.push_back(address);
+            }
+        }
+
+        while let Some(address) = worklist.pop_front() {
+            let Some(object) = self.objects[address].as_ref() else {
+                continue;
+            };
+            for child in object.references() {
+                if child < object_count && self.objects[child].is_some() && !reachable[child] {
+                    reachable[child] = true;
+                    worklist.push_back(child);
+                }
+            }
+        }
+
+        let mut pending_release = VecDeque::new();
+        for address in 0..object_count {
+            if self.objects[address].is_some() && !reachable[address] {
+                pending_release.push_back(address);
+            }
+        }
+
+        let mut reclaimed = 0usize;
+        while let Some(address) = pending_release.pop_front() {
+            if self.try_release(address) {
+                reclaimed += 1;
+                continue;
+            }
+
+            let child_references = self
+                .objects
+                .get(address)
+                .and_then(|object| object.as_ref())
+                .map(|object| object.references())
+                .unwrap_or_default();
+
+            self.objects[address] = None;
+            self.free_list.push(address);
+            reclaimed += 1;
+
+            for child in child_references {
+                if self.release_reference(child).is_ok() && self.try_release(child) {
+                    pending_release.push_back(child);
+                }
+            }
+        }
+
         if reclaimed > 0 {
-            log::info!("Reclaimed {} zero-ref heap objects", reclaimed);
+            log::info!("Reclaimed {} unreachable heap objects", reclaimed);
         }
     }
 
@@ -363,6 +445,7 @@ impl HeapObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn gc_preserves_objects_reachable_from_live_actor_vm_stack() {
@@ -371,9 +454,22 @@ mod tests {
         let array_address =
             heap.allocate(HeapObject::Array(vec![Value::Reference(string_address)], 0));
 
-        let (mut actor_vm, actor_sender) = VM::new(Vec::new(), None);
-        actor_vm.push_stack_value_for_test(Value::Reference(array_address));
-        let actor_address = heap.allocate(HeapObject::Actor(actor_vm, actor_sender, 1));
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let (actor_sender, _actor_mailbox) = tokio::sync::mpsc::channel(1);
+        let final_stack = Arc::new(Mutex::new(vec![Value::Reference(array_address)]));
+        let task = runtime.spawn(async { Ok(()) });
+        let actor = ProcessHandle::new(
+            1,
+            None,
+            0,
+            Vec::new(),
+            None,
+            Vec::new(),
+            false,
+            task,
+            final_stack,
+        );
+        let actor_address = heap.allocate(HeapObject::Actor(actor, actor_sender, 1));
 
         heap.collect_garbage();
 
