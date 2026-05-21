@@ -605,8 +605,8 @@ impl OpCode {
                     heap.release_reference(address)?;
                 }
 
-                if let Value::Reference(address) = value {
-                    increment_reference(heap, address)?;
+                if let Some(previous) = execution.locals.insert(*index, value) {
+                    release_value(heap, previous)?;
                 }
 
                 Ok(())
@@ -779,9 +779,8 @@ impl OpCode {
                 push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SendMessage => {
-                // SendMessage has stack-stable behavior for actor references:
-                // the actor reference is present on the stack after the opcode
-                // finishes, regardless of success or failure.
+                // SendMessage consumes the message and leaves the actor reference
+                // on the stack (or restores it on failure/yield).
                 let actor_ref = pop_raw_value(execution)?;
                 let message = pop_value(execution, heap)?;
                 if let Value::Reference(address) = actor_ref {
@@ -795,7 +794,6 @@ impl OpCode {
                     let message_for_channel = heap.value_to_message(message.clone())?;
                     match sender.try_send(message_for_channel) {
                         Ok(()) => {
-                            push_existing_value(execution, message);
                             push_existing_value(execution, Value::Reference(address));
                             Ok(())
                         }
@@ -1012,5 +1010,36 @@ mod heap_opcode_tests {
             .execute(&mut execution, &mut heap)
             .unwrap();
         assert_eq!(execution.stack.pop(), Some(Value::Integer(5)));
+    }
+
+    #[tokio::test]
+    async fn store_var_preserves_child_reference_counts() {
+        let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+        let mut heap = Heap::new();
+
+        OpCode::MakeString("child".to_string())
+            .execute(&mut execution, &mut heap)
+            .unwrap();
+        let child_address = match execution.stack.last().copied() {
+            Some(Value::Reference(address)) => address,
+            other => panic!("expected child string reference on stack, got {other:?}"),
+        };
+
+        OpCode::MakeArray(1).execute(&mut execution, &mut heap).unwrap();
+        let parent_address = match execution.stack.last().copied() {
+            Some(Value::Reference(address)) => address,
+            other => panic!("expected parent array reference on stack, got {other:?}"),
+        };
+
+        OpCode::StoreVar(0).execute(&mut execution, &mut heap).unwrap();
+
+        match heap.get(parent_address) {
+            Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 1, "stored parent should be retained"),
+            other => panic!("expected stored parent array in heap, got {other:?}"),
+        }
+        match heap.get(child_address) {
+            Some(HeapObject::String(_, rc)) => assert_eq!(*rc, 1, "child should remain retained by parent"),
+            other => panic!("expected child string in heap, got {other:?}"),
+        }
     }
 }

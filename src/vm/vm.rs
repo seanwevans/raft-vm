@@ -43,7 +43,10 @@ pub struct VM {
 }
 
 impl VM {
-    pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<MessageValue>) {
+    pub fn new(
+        bytecode: Vec<OpCode>,
+        supervisor: Option<Sender<usize>>,
+    ) -> (Self, Sender<MessageValue>) {
         Self::new_with_debug(bytecode, None, supervisor)
             .expect("failed to allocate process id for VM")
     }
@@ -203,7 +206,10 @@ impl VM {
                     let error = err.to_string();
                     let _value = err.0;
                     self.push_runtime_value(Value::Reference(actor_address))?;
-                    Err(VmError::ChannelSend { error, value: Value::Null })
+                    Err(VmError::ChannelSend {
+                        error,
+                        value: Value::Null,
+                    })
                 }
             },
         }
@@ -282,6 +288,10 @@ impl VM {
         self.self_sender.clone()
     }
 
+    pub fn value_to_message(&self, value: Value) -> Result<MessageValue, VmError> {
+        self.heap.value_to_message(value)
+    }
+
     pub fn link(&mut self, sender: Sender<MessageValue>) {
         self.links.push(sender);
     }
@@ -340,7 +350,7 @@ impl VM {
 mod tests {
     use super::*;
     use crate::vm::opcodes::OpCode;
-    use crate::vm::value::{MessageValue, Value};
+    use crate::vm::value::Value;
 
     #[tokio::test]
     async fn test_basic_arithmetic() {

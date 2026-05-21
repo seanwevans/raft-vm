@@ -26,14 +26,6 @@ pub struct NativeFunction {
 
 /// A handle to a process spawned onto the Tokio runtime.
 ///
-/// ### Option 3 tradeoff (current contract)
-///
-/// **Buys:** lightweight process tracking that can await task completion and
-/// inspect captured post-mortem state.
-///
-/// **Costs:** no live mailbox ownership through the handle while the process is
-/// running.
-///
 /// A `ProcessHandle` represents a process that has been spawned onto the Tokio
 /// runtime. While the process is running, its mailbox is owned by the VM inside
 /// the spawned task; the handle does not provide a way to peek at or close the
@@ -394,9 +386,11 @@ impl Heap {
                     .map(|(k, v)| Ok((k.clone(), self.value_to_message(v.clone())?)))
                     .collect::<Result<HashMap<_, _>, VmError>>()?,
             )),
-            HeapObject::NativeFunction(_, _) | HeapObject::Actor(_, _, _) | HeapObject::Supervisor(_, _, _) => {
-                Err(VmError::TypeMismatch("SendMessage unsupported reference type"))
-            }
+            HeapObject::NativeFunction(_, _)
+            | HeapObject::Actor(_, _, _)
+            | HeapObject::Supervisor(_, _, _) => Err(VmError::TypeMismatch(
+                "SendMessage unsupported reference type",
+            )),
         }
     }
 
@@ -467,7 +461,10 @@ impl HeapObject {
                     _ => None,
                 })
                 .collect(),
-            HeapObject::Actor(vm, _, _) | HeapObject::Supervisor(vm, _, _) => vm.heap_references(),
+            // Actor/Supervisor heaps are isolated from the parent heap. Any references in the
+            // child's final stack are addresses in the child heap and are not valid indices for
+            // the parent heap during parent GC traversal.
+            HeapObject::Actor(_, _, _) | HeapObject::Supervisor(_, _, _) => Vec::new(),
             HeapObject::String(_, _) | HeapObject::NativeFunction(_, _) => Vec::new(),
         }
     }
@@ -513,7 +510,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     #[test]
-    fn gc_preserves_objects_reachable_from_live_actor_vm_stack() {
+    fn gc_does_not_treat_actor_heap_addresses_as_parent_heap_references() {
         let mut heap = Heap::new();
         let string_address = heap.allocate(HeapObject::String("actor string".to_string(), 0));
         let array_address =
@@ -543,12 +540,12 @@ mod tests {
             "live actor should not be reclaimed"
         );
         assert!(
-            matches!(heap.get(array_address), Some(HeapObject::Array(_, 0))),
-            "array referenced by actor VM stack should not be reclaimed"
+            heap.get(array_address).is_none(),
+            "child heap addresses in actor final stack must not pin parent heap objects"
         );
         assert!(
-            matches!(heap.get(string_address), Some(HeapObject::String(value, 0)) if value == "actor string"),
-            "string referenced by actor VM array should not be reclaimed"
+            heap.get(string_address).is_none(),
+            "parent transitive references from a child heap address must be reclaimable"
         );
     }
 }
