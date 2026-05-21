@@ -70,12 +70,11 @@ async fn send_and_receive_message_updates_reference_counts() {
 
     assert_eq!(actor_ref_count(&heap, actor_a), 1, "actor on stack");
     match heap.get(message_ref) {
-        Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 1, "message queued"),
+        Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 0, "message consumed"),
         other => panic!("expected message array, got {other:?}"),
     }
 
-    // Drop both stack references and collect.
-    OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
+    // Drop the remaining actor stack reference and collect.
     OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     assert_eq!(actor_ref_count(&heap, actor_a), 0);
     match heap.get(message_ref) {

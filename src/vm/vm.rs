@@ -350,7 +350,7 @@ impl VM {
 mod tests {
     use super::*;
     use crate::vm::opcodes::OpCode;
-    use crate::vm::value::{MessageValue, Value};
+    use crate::vm::value::Value;
 
     #[tokio::test]
     async fn test_basic_arithmetic() {
