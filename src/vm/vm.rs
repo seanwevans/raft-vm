@@ -184,7 +184,7 @@ impl VM {
                     .mailbox_mut()
                     .recv()
                     .await
-                    .ok_or(VmError::MailboxEmpty)?;
+                    .ok_or(VmError::MailboxDisconnected)?;
                 if let Value::Reference(address) = message {
                     self.decrement_reference(address)?;
                 }

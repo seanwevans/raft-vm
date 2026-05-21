@@ -971,7 +971,7 @@ impl OpCode {
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     log::warn!("Mailbox is closed");
-                    Err(VmError::MailboxEmpty)
+                    Err(VmError::MailboxDisconnected)
                 }
             },
 

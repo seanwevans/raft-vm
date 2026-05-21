@@ -41,6 +41,8 @@ pub enum VmError {
     NativeArityMismatch { expected: usize, actual: usize },
     #[error("Mailbox empty")]
     MailboxEmpty,
+    #[error("Mailbox disconnected")]
+    MailboxDisconnected,
     #[error("Channel send error: {error}")]
     ChannelSend { error: String, value: Value },
     #[error("Compilation error: {0}")]
