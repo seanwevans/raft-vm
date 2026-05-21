@@ -43,31 +43,6 @@ fn increment_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
     }
 }
 
-#[allow(dead_code)]
-fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
-    let child_references = if let Some(object) = heap.get_mut(address) {
-        let child_references = match object {
-            HeapObject::Array(elements, rc) if *rc == 1 => elements.clone(),
-            HeapObject::Module {
-                exports, ref_count, ..
-            } if *ref_count == 1 => exports.values().cloned().collect(),
-            _ => Vec::new(),
-        };
-        object.decrement_ref();
-        child_references
-    } else {
-        return Err(VmError::InvalidReference);
-    };
-
-    for value in child_references {
-        if let Value::Reference(child_address) = value {
-            heap.release_reference(child_address)?;
-        }
-    }
-
-    Ok(())
-}
-
 fn actor_start_ip(heap: &Heap, address: usize) -> Result<usize, VmError> {
     match heap.get(address) {
         Some(HeapObject::Actor(process, _, _)) => Ok(process.restart_ip()),
