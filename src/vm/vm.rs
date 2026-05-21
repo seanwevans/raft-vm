@@ -329,7 +329,7 @@ impl VM {
         let bytecode = self.execution.bytecode.clone();
         let debug_info = self.execution.debug_info.clone();
         let (_tx, rx) = mpsc::channel(100);
-        self.execution = ExecutionContext::new_with_debug(bytecode, debug_info, rx);
+        self.execution = ExecutionContext::with_mailbox_and_debug(bytecode, rx, debug_info);
         self.execution.ip = start_ip;
     }
 
@@ -338,7 +338,7 @@ impl VM {
     }
 
     pub fn bytecode(&self) -> Vec<OpCode> {
-        self.execution.bytecode.clone()
+        self.execution.bytecode.opcodes()
     }
 
     pub fn debug_info(&self) -> Option<DebugInfo> {

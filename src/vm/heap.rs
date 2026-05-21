@@ -110,6 +110,10 @@ impl ProcessHandle {
         self.bytecode.clone()
     }
 
+    pub fn heap_references(&self) -> Vec<usize> {
+        Vec::new()
+    }
+
     pub fn debug_info(&self) -> Option<DebugInfo> {
         self.debug_info.clone()
     }

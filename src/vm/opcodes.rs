@@ -443,230 +443,33 @@ fn call_native(
 
 #[derive(Debug, Clone)]
 pub struct Bytecode {
-    instructions: Vec<u8>,
-    constants: Vec<BytecodeConstant>,
-    offsets: Vec<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub enum BytecodeConstant {
-    Value(Value),
-    String(String),
-    Strings(Vec<String>),
-    NativeFunction(NativeFunction),
+    opcodes: Vec<Arc<OpCode>>,
 }
 
 impl Bytecode {
     pub fn new(opcodes: Vec<OpCode>) -> Self {
-        let mut bytecode = Self {
-            instructions: Vec::new(),
-            constants: Vec::new(),
-            offsets: Vec::with_capacity(opcodes.len()),
-        };
-        for opcode in opcodes {
-            bytecode.encode(opcode);
+        Self {
+            opcodes: opcodes.into_iter().map(Arc::new).collect(),
         }
-        bytecode
-    }
-
-    pub fn instructions(&self) -> &[u8] {
-        &self.instructions
-    }
-
-    pub fn constants(&self) -> &[BytecodeConstant] {
-        &self.constants
-    }
-
-    pub fn offsets(&self) -> &[usize] {
-        &self.offsets
     }
 
     pub fn len(&self) -> usize {
-        self.offsets.len()
+        self.opcodes.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.offsets.is_empty()
+        self.opcodes.is_empty()
     }
 
-    pub fn decode(&self, ip: usize) -> Result<OpCode, VmError> {
-        let offset = *self.offsets.get(ip).ok_or(VmError::ExecutionOutOfBounds)?;
-        let opcode = *self
-            .instructions
-            .get(offset)
-            .ok_or(VmError::ExecutionOutOfBounds)?;
-        let operand = || self.read_u32(offset + 1).map(|value| value as usize);
-        match opcode {
-            OP_STORE_VAR => Ok(OpCode::StoreVar(operand()?)),
-            OP_LOAD_VAR => Ok(OpCode::LoadVar(operand()?)),
-            OP_LOAD_GLOBAL => Ok(OpCode::LoadGlobal(
-                self.string_constant(operand()?)?.to_string(),
-            )),
-            OP_GET_EXPORT => Ok(OpCode::GetExport(
-                self.string_constant(operand()?)?.to_string(),
-            )),
-            OP_PUSH_CONST => Ok(OpCode::PushConst(self.value_constant(operand()?)?)),
-            OP_MAKE_ARRAY => Ok(OpCode::MakeArray(operand()?)),
-            OP_POP => Ok(OpCode::Pop),
-            OP_DUP => Ok(OpCode::Dup),
-            OP_SWAP => Ok(OpCode::Swap),
-            OP_ADD => Ok(OpCode::Add),
-            OP_SUB => Ok(OpCode::Sub),
-            OP_MUL => Ok(OpCode::Mul),
-            OP_DIV => Ok(OpCode::Div),
-            OP_MOD => Ok(OpCode::Mod),
-            OP_NEG => Ok(OpCode::Neg),
-            OP_EXP => Ok(OpCode::Exp),
-            OP_ARRAY_GET => Ok(OpCode::ArrayGet),
-            OP_ARRAY_SET => Ok(OpCode::ArraySet),
-            OP_MAKE_STRING => Ok(OpCode::MakeString(
-                self.string_constant(operand()?)?.to_string(),
-            )),
-            OP_STRING_CONCAT => Ok(OpCode::StringConcat),
-            OP_MAKE_MODULE => Ok(OpCode::MakeModule(
-                self.strings_constant(operand()?)?.to_vec(),
-            )),
-            OP_MODULE_GET => Ok(OpCode::ModuleGet(
-                self.string_constant(operand()?)?.to_string(),
-            )),
-            OP_MODULE_SET => Ok(OpCode::ModuleSet(
-                self.string_constant(operand()?)?.to_string(),
-            )),
-            OP_MAKE_NATIVE_FUNCTION => Ok(OpCode::MakeNativeFunction(
-                self.native_constant(operand()?)?.clone(),
-            )),
-            OP_CALL_NATIVE => Ok(OpCode::CallNative(operand()?)),
-            OP_JUMP => Ok(OpCode::Jump(operand()?)),
-            OP_JUMP_IF_FALSE => Ok(OpCode::JumpIfFalse(operand()?)),
-            OP_CALL => Ok(OpCode::Call(operand()?)),
-            OP_RETURN => Ok(OpCode::Return),
-            OP_SPAWN_ACTOR => Ok(OpCode::SpawnActor(operand()?)),
-            OP_SEND_MESSAGE => Ok(OpCode::SendMessage),
-            OP_RECEIVE_MESSAGE => Ok(OpCode::ReceiveMessage),
-            OP_SPAWN_SUPERVISOR => Ok(OpCode::SpawnSupervisor(operand()?)),
-            OP_SET_STRATEGY => Ok(OpCode::SetStrategy(operand()?)),
-            OP_RESTART_CHILD => Ok(OpCode::RestartChild(operand()?)),
-            _ => Err(VmError::ExecutionOutOfBounds),
-        }
+    pub fn decode(&self, ip: usize) -> Result<Arc<OpCode>, VmError> {
+        self.opcodes
+            .get(ip)
+            .cloned()
+            .ok_or(VmError::ExecutionOutOfBounds)
     }
 
-    fn encode(&mut self, opcode: OpCode) {
-        self.offsets.push(self.instructions.len());
-        match opcode {
-            OpCode::StoreVar(value) => self.emit_operand(OP_STORE_VAR, value),
-            OpCode::LoadVar(value) => self.emit_operand(OP_LOAD_VAR, value),
-            OpCode::LoadGlobal(value) => {
-                let index = self.push_constant(BytecodeConstant::String(value));
-                self.emit_operand(OP_LOAD_GLOBAL, index);
-            }
-            OpCode::GetExport(value) => {
-                let index = self.push_constant(BytecodeConstant::String(value));
-                self.emit_operand(OP_GET_EXPORT, index);
-            }
-            OpCode::PushConst(value) => {
-                let index = self.push_constant(BytecodeConstant::Value(value));
-                self.emit_operand(OP_PUSH_CONST, index);
-            }
-            OpCode::MakeArray(value) => self.emit_operand(OP_MAKE_ARRAY, value),
-            OpCode::Pop => self.emit(OP_POP),
-            OpCode::Dup => self.emit(OP_DUP),
-            OpCode::Swap => self.emit(OP_SWAP),
-            OpCode::Add => self.emit(OP_ADD),
-            OpCode::Sub => self.emit(OP_SUB),
-            OpCode::Mul => self.emit(OP_MUL),
-            OpCode::Div => self.emit(OP_DIV),
-            OpCode::Mod => self.emit(OP_MOD),
-            OpCode::Neg => self.emit(OP_NEG),
-            OpCode::Exp => self.emit(OP_EXP),
-            OpCode::ArrayGet => self.emit(OP_ARRAY_GET),
-            OpCode::ArraySet => self.emit(OP_ARRAY_SET),
-            OpCode::MakeString(value) | OpCode::PushString(value) => {
-                let index = self.push_constant(BytecodeConstant::String(value));
-                self.emit_operand(OP_MAKE_STRING, index);
-            }
-            OpCode::StringConcat => self.emit(OP_STRING_CONCAT),
-            OpCode::MakeModule(value) => {
-                let index = self.push_constant(BytecodeConstant::Strings(value));
-                self.emit_operand(OP_MAKE_MODULE, index);
-            }
-            OpCode::ModuleGet(value) => {
-                let index = self.push_constant(BytecodeConstant::String(value));
-                self.emit_operand(OP_MODULE_GET, index);
-            }
-            OpCode::ModuleSet(value) => {
-                let index = self.push_constant(BytecodeConstant::String(value));
-                self.emit_operand(OP_MODULE_SET, index);
-            }
-            OpCode::MakeNativeFunction(value) => {
-                let index = self.push_constant(BytecodeConstant::NativeFunction(value));
-                self.emit_operand(OP_MAKE_NATIVE_FUNCTION, index);
-            }
-            OpCode::CallNative(value) => self.emit_operand(OP_CALL_NATIVE, value),
-            OpCode::Jump(value) => self.emit_operand(OP_JUMP, value),
-            OpCode::JumpIfFalse(value) => self.emit_operand(OP_JUMP_IF_FALSE, value),
-            OpCode::Call(value) => self.emit_operand(OP_CALL, value),
-            OpCode::Return => self.emit(OP_RETURN),
-            OpCode::SpawnActor(value) => self.emit_operand(OP_SPAWN_ACTOR, value),
-            OpCode::SendMessage => self.emit(OP_SEND_MESSAGE),
-            OpCode::ReceiveMessage => self.emit(OP_RECEIVE_MESSAGE),
-            OpCode::SpawnSupervisor(value) => self.emit_operand(OP_SPAWN_SUPERVISOR, value),
-            OpCode::SetStrategy(value) => self.emit_operand(OP_SET_STRATEGY, value),
-            OpCode::RestartChild(value) => self.emit_operand(OP_RESTART_CHILD, value),
-        }
-    }
-
-    fn emit(&mut self, opcode: u8) {
-        self.instructions.push(opcode);
-    }
-
-    fn emit_operand(&mut self, opcode: u8, operand: usize) {
-        self.instructions.push(opcode);
-        self.instructions
-            .extend_from_slice(&(operand as u32).to_le_bytes());
-    }
-
-    fn push_constant(&mut self, constant: BytecodeConstant) -> usize {
-        let index = self.constants.len();
-        self.constants.push(constant);
-        index
-    }
-
-    fn read_u32(&self, offset: usize) -> Result<u32, VmError> {
-        let bytes: [u8; 4] = self
-            .instructions
-            .get(offset..offset + 4)
-            .ok_or(VmError::ExecutionOutOfBounds)?
-            .try_into()
-            .map_err(|_| VmError::ExecutionOutOfBounds)?;
-        Ok(u32::from_le_bytes(bytes))
-    }
-
-    fn value_constant(&self, index: usize) -> Result<Value, VmError> {
-        match self.constants.get(index) {
-            Some(BytecodeConstant::Value(value)) => Ok(*value),
-            _ => Err(VmError::ExecutionOutOfBounds),
-        }
-    }
-
-    fn string_constant(&self, index: usize) -> Result<&str, VmError> {
-        match self.constants.get(index) {
-            Some(BytecodeConstant::String(value)) => Ok(value),
-            _ => Err(VmError::ExecutionOutOfBounds),
-        }
-    }
-
-    fn strings_constant(&self, index: usize) -> Result<&[String], VmError> {
-        match self.constants.get(index) {
-            Some(BytecodeConstant::Strings(value)) => Ok(value),
-            _ => Err(VmError::ExecutionOutOfBounds),
-        }
-    }
-
-    fn native_constant(&self, index: usize) -> Result<&NativeFunction, VmError> {
-        match self.constants.get(index) {
-            Some(BytecodeConstant::NativeFunction(value)) => Ok(value),
-            _ => Err(VmError::ExecutionOutOfBounds),
-        }
+    pub fn opcodes(&self) -> Vec<OpCode> {
+        self.opcodes.iter().map(|opcode| opcode.as_ref().clone()).collect()
     }
 }
 
@@ -675,42 +478,6 @@ impl From<Vec<OpCode>> for Bytecode {
         Bytecode::new(value)
     }
 }
-
-const OP_STORE_VAR: u8 = 0x01;
-const OP_LOAD_VAR: u8 = 0x02;
-const OP_LOAD_GLOBAL: u8 = 0x03;
-const OP_GET_EXPORT: u8 = 0x04;
-const OP_PUSH_CONST: u8 = 0x05;
-const OP_MAKE_ARRAY: u8 = 0x06;
-const OP_POP: u8 = 0x07;
-const OP_DUP: u8 = 0x08;
-const OP_SWAP: u8 = 0x09;
-const OP_ADD: u8 = 0x10;
-const OP_SUB: u8 = 0x11;
-const OP_MUL: u8 = 0x12;
-const OP_DIV: u8 = 0x13;
-const OP_MOD: u8 = 0x14;
-const OP_NEG: u8 = 0x15;
-const OP_EXP: u8 = 0x16;
-const OP_ARRAY_GET: u8 = 0x20;
-const OP_ARRAY_SET: u8 = 0x21;
-const OP_MAKE_STRING: u8 = 0x22;
-const OP_STRING_CONCAT: u8 = 0x23;
-const OP_MAKE_MODULE: u8 = 0x24;
-const OP_MODULE_GET: u8 = 0x25;
-const OP_MODULE_SET: u8 = 0x26;
-const OP_MAKE_NATIVE_FUNCTION: u8 = 0x27;
-const OP_CALL_NATIVE: u8 = 0x28;
-const OP_JUMP: u8 = 0x30;
-const OP_JUMP_IF_FALSE: u8 = 0x31;
-const OP_CALL: u8 = 0x32;
-const OP_RETURN: u8 = 0x33;
-const OP_SPAWN_ACTOR: u8 = 0x40;
-const OP_SEND_MESSAGE: u8 = 0x41;
-const OP_RECEIVE_MESSAGE: u8 = 0x42;
-const OP_SPAWN_SUPERVISOR: u8 = 0x50;
-const OP_SET_STRATEGY: u8 = 0x51;
-const OP_RESTART_CHILD: u8 = 0x52;
 
 #[derive(Debug, Clone)]
 pub enum OpCode {
@@ -985,7 +752,7 @@ impl OpCode {
                     return Err(VmError::ExecutionOutOfBounds);
                 }
                 let (handle, tx) = spawn_child_vm(
-                    execution.bytecode.clone(),
+                    execution.bytecode.opcodes(),
                     execution.debug_info.clone(),
                     *addr,
                     process.as_ref(),
@@ -1052,7 +819,7 @@ impl OpCode {
                     return Err(VmError::ExecutionOutOfBounds);
                 }
                 let (handle, tx) = spawn_child_vm(
-                    execution.bytecode.clone(),
+                    execution.bytecode.opcodes(),
                     execution.debug_info.clone(),
                     *addr,
                     process.as_ref(),
