@@ -7,7 +7,7 @@ use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::supervision::{ExitReason, ExitSignal};
-use crate::vm::value::Value;
+use crate::vm::value::{MessageValue, Value};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -42,18 +42,18 @@ fn allocate_process_id() -> Result<usize, VmError> {
 pub struct VM {
     execution: ExecutionContext,
     heap: Heap,
-    self_sender: Sender<Value>,
+    self_sender: Sender<MessageValue>,
     process_id: usize,
     parent: Option<usize>,
     restart_ip: usize,
-    links: Vec<Sender<Value>>,
+    links: Vec<Sender<MessageValue>>,
     trap_exits: bool,
     reductions: usize,
     _supervisor: Option<Sender<usize>>,
 }
 
 impl VM {
-    pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
+    pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<MessageValue>) {
         Self::new_with_debug(bytecode, None, supervisor)
             .expect("failed to allocate process id for VM")
     }
@@ -62,7 +62,7 @@ impl VM {
         bytecode: impl Into<Bytecode>,
         debug_info: Option<DebugInfo>,
         supervisor: Option<Sender<usize>>,
-    ) -> Result<(Self, Sender<Value>), VmError> {
+    ) -> Result<(Self, Sender<MessageValue>), VmError> {
         let (tx, rx) = mpsc::channel(100);
         let bytecode: Bytecode = bytecode.into();
         log::info!("Initializing VM with {} opcodes", bytecode.len());
@@ -200,7 +200,8 @@ impl VM {
                     .recv()
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
-                self.push_runtime_value(message)
+                let value = self.heap.message_to_value(message)?;
+                self.push_runtime_value(value)
             }
             BlockingOperation::SendMessage {
                 sender,
@@ -210,10 +211,9 @@ impl VM {
                 Ok(()) => self.push_runtime_value(Value::Reference(actor_address)),
                 Err(err) => {
                     let error = err.to_string();
-                    let value = err.0;
+                    let _value = err.0;
                     self.push_runtime_value(Value::Reference(actor_address))?;
-                    self.release_runtime_value(value)?;
-                    Err(VmError::ChannelSend { error, value })
+                    Err(VmError::ChannelSend { error, value: Value::Null })
                 }
             },
         }
@@ -288,11 +288,11 @@ impl VM {
         self.parent
     }
 
-    pub fn sender(&self) -> Sender<Value> {
+    pub fn sender(&self) -> Sender<MessageValue> {
         self.self_sender.clone()
     }
 
-    pub fn link(&mut self, sender: Sender<Value>) {
+    pub fn link(&mut self, sender: Sender<MessageValue>) {
         self.links.push(sender);
     }
 
@@ -316,7 +316,7 @@ impl VM {
         self.execution.ip = start_ip;
     }
 
-    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<MessageValue> {
         self.execution.mailbox_mut()
     }
 
@@ -328,18 +328,18 @@ impl VM {
         self.execution.debug_info.clone()
     }
 
-    pub fn links(&self) -> Vec<Sender<Value>> {
+    pub fn links(&self) -> Vec<Sender<MessageValue>> {
         self.links.clone()
     }
 
     async fn notify_links(&self, error: &VmError) {
-        let signal = Value::ExitSignal(ExitSignal {
+        let signal = MessageValue::ExitSignal(ExitSignal {
             from: self.process_id,
             reason: ExitReason::from(error),
         });
 
         for link in &self.links {
-            if let Err(err) = link.send(signal).await {
+            if let Err(err) = link.send(signal.clone()).await {
                 log::warn!("Failed to deliver exit signal: {}", err);
             }
         }
@@ -359,7 +359,7 @@ impl Drop for VM {
 mod tests {
     use super::*;
     use crate::vm::opcodes::OpCode;
-    use crate::vm::value::Value;
+    use crate::vm::value::{MessageValue, Value};
 
     #[tokio::test]
     async fn test_basic_arithmetic() {
@@ -504,6 +504,7 @@ mod tests {
             Some(Value::Reference(addr)) => *addr,
             other => panic!("Expected actor reference, got {:?}", other),
         };
+        let _ = actor_addr;
         if let Some(HeapObject::Actor(_, actor_sender, _)) = vm.heap.get_mut(actor_addr) {
             let (closed_sender, closed_receiver) = mpsc::channel(1);
             drop(closed_receiver);
@@ -572,14 +573,14 @@ mod tests {
             .await_blocking_operation(BlockingOperation::SendMessage {
                 sender,
                 actor_address: actor_addr,
-                message: Value::Reference(message_addr),
+                message: crate::vm::value::MessageValue::Array(Vec::new()),
             })
             .await
             .expect_err("closed blocking send should fail");
 
         match err {
             VmError::ChannelSend { value, .. } => {
-                assert_eq!(value, Value::Reference(message_addr));
+                assert_eq!(value, Value::Null);
             }
             other => panic!("Expected ChannelSend error, got {other:?}"),
         }
