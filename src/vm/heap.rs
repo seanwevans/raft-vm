@@ -394,9 +394,11 @@ impl Heap {
                     .map(|(k, v)| Ok((k.clone(), self.value_to_message(*v)?)))
                     .collect::<Result<HashMap<_, _>, VmError>>()?,
             )),
-            HeapObject::NativeFunction(_, _) | HeapObject::Actor(_, _, _) | HeapObject::Supervisor(_, _, _) => {
-                Err(VmError::TypeMismatch("SendMessage unsupported reference type"))
-            }
+            HeapObject::NativeFunction(_, _)
+            | HeapObject::Actor(_, _, _)
+            | HeapObject::Supervisor(_, _, _) => Err(VmError::TypeMismatch(
+                "SendMessage unsupported reference type",
+            )),
         }
     }
 
