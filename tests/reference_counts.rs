@@ -43,9 +43,9 @@ async fn actor_reference_lifecycle_on_stack() {
 
 #[tokio::test]
 async fn send_and_receive_message_updates_reference_counts() {
-    let (tx, mailbox) = channel(1);
-    let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], mailbox);
+    let (_tx, mailbox) = channel(1);
     let mut heap = Heap::new();
+    let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], mailbox);
 
     // Spawn target actor (A) and message actor (B)
     OpCode::SpawnActor(0)
@@ -73,40 +73,40 @@ async fn send_and_receive_message_updates_reference_counts() {
     assert_eq!(actor_ref_count(&heap, actor_a), 1, "actor on stack");
     assert_eq!(actor_ref_count(&heap, actor_b), 1, "message queued");
 
-    // Simulate the message arriving back to this VM's mailbox.
-    let message = {
-        let actor_entry = heap.get_mut(actor_a).expect("Expected actor VM for target");
-        match actor_entry {
-            HeapObject::Actor(vm, _, _) => vm.mailbox_mut().recv().await,
-            _ => panic!("Expected actor VM for target"),
-        }
-    }
-    .expect("Actor mailbox was empty");
-
-    if let Value::Reference(addr) = message {
-        if let Some(object) = heap.get_mut(addr) {
-            object.decrement_ref();
-            object.increment_ref();
-        } else {
-            panic!("Message reference not found in heap");
-        }
-    }
-
-    tx.send(message).await.unwrap();
-
-    OpCode::ReceiveMessage
-        .execute(&mut execution, &mut heap)
-        .unwrap();
-
-    assert_eq!(actor_ref_count(&heap, actor_b), 1, "message now on stack");
-
     // Drop both stack references and collect.
     OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
     OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
+    assert_eq!(actor_ref_count(&heap, actor_a), 0);
     assert_eq!(actor_ref_count(&heap, actor_b), 0);
 
     heap.collect_garbage();
+    assert!(heap.get(actor_a).is_none());
     assert!(heap.get(actor_b).is_none());
+}
+
+#[tokio::test]
+async fn receive_message_updates_reference_counts() {
+    let (tx, mailbox) = channel(1);
+    let mut execution = ExecutionContext::with_mailbox(vec![OpCode::Return], mailbox);
+    let mut heap = Heap::new();
+
+    let message_addr = heap.allocate(HeapObject::Array(vec![], 1));
+    tx.send(Value::Reference(message_addr))
+        .await
+        .expect("sending message into mailbox should succeed");
+
+    OpCode::ReceiveMessage
+        .execute(&mut execution, &mut heap)
+        .expect("ReceiveMessage should push message onto stack");
+
+    assert_eq!(execution.stack, vec![Value::Reference(message_addr)]);
+    match heap
+        .get(message_addr)
+        .expect("message object should still be allocated")
+    {
+        HeapObject::Array(_, rc) => assert_eq!(*rc, 2, "message should be retained on stack"),
+        other => panic!("expected array at message_addr, got {other:?}"),
+    }
 }
 
 #[tokio::test]

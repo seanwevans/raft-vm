@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::value::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 
 use crate::compiler::DebugInfo;
@@ -24,7 +24,34 @@ pub struct NativeFunction {
     pub function: fn(Vec<Value>) -> Result<Value, VmError>,
 }
 
+/// A handle to a process spawned onto the Tokio runtime.
+///
+/// ### Option 3 tradeoff (current contract)
+///
+/// **Buys:** lightweight process tracking that can await task completion and
+/// inspect captured post-mortem state.
+///
+/// **Costs:** no live mailbox ownership through the handle while the process is
+/// running.
+///
+/// A `ProcessHandle` represents a process that has been spawned onto the Tokio
+/// runtime. While the process is running, its mailbox is owned by the VM inside
+/// the spawned task; the handle does not provide a way to peek at or close the
+/// mailbox in-flight. To send messages, use the `Sender<Value>` stored
+/// alongside the handle in `HeapObject::Actor`.
+///
+/// To inspect a process post-mortem, await [`ProcessHandle::run`] (which awaits
+/// the underlying `JoinHandle`) and then read [`ProcessHandle::pop_stack`] or
+/// [`ProcessHandle::heap_references`] from the captured `final_stack`.
+///
+/// This makes the limitation explicit and gives Phase 1 a clear target:
+/// introduce a proper `Process` type that is not moved into a Tokio task and
+/// can therefore provide live mailbox access.
 #[derive(Debug)]
+/// While a process is running, the only way to communicate with it from outside is via the
+/// `Sender<Value>` stored alongside the handle in `HeapObject::Actor`. The handle itself
+/// exposes no live mailbox view; the running VM owns it. Post-mortem state is available via
+/// `pop_stack` once `run` has been awaited.
 pub struct ProcessHandle {
     process_id: usize,
     parent: Option<usize>,
@@ -36,8 +63,6 @@ pub struct ProcessHandle {
     trap_exits: bool,
     supervisor_state: SupervisorState,
     task: Option<JoinHandle<Result<(), VmError>>>,
-    mailbox: Receiver<Value>,
-    mailbox_sender: Sender<Value>,
     final_stack: Arc<Mutex<Vec<Value>>>,
 }
 
@@ -66,8 +91,6 @@ impl ProcessHandle {
         links: Vec<Sender<Value>>,
         trap_exits: bool,
         task: JoinHandle<Result<(), VmError>>,
-        mailbox: Receiver<Value>,
-        mailbox_sender: Sender<Value>,
         final_stack: Arc<Mutex<Vec<Value>>>,
     ) -> Self {
         Self {
@@ -81,8 +104,6 @@ impl ProcessHandle {
             trap_exits,
             supervisor_state: SupervisorState::default(),
             task: Some(task),
-            mailbox,
-            mailbox_sender,
             final_stack,
         }
     }
@@ -111,7 +132,6 @@ impl ProcessHandle {
         self.bytecode.clone()
     }
 
-
     pub fn debug_info(&self) -> Option<DebugInfo> {
         self.debug_info.clone()
     }
@@ -124,21 +144,13 @@ impl ProcessHandle {
         self.trap_exits
     }
 
-    pub fn replace_runtime(
-        &mut self,
-        task: JoinHandle<Result<(), VmError>>,
-        start_ip: usize,
-        mailbox: Receiver<Value>,
-        mailbox_sender: Sender<Value>,
-    ) {
+    pub fn replace_runtime(&mut self, task: JoinHandle<Result<(), VmError>>, start_ip: usize) {
         if let Some(task) = &self.task {
             task.abort();
         }
         self.task = Some(task);
         self.start_ip = start_ip;
         self.current_ip = start_ip;
-        self.mailbox = mailbox;
-        self.mailbox_sender = mailbox_sender;
     }
 
     pub async fn run(&mut self) -> Result<(), VmError> {
@@ -158,18 +170,6 @@ impl ProcessHandle {
             .map_err(|err| VmError::Message(err.to_string()))?
             .pop()
             .ok_or(VmError::StackUnderflow)
-    }
-
-    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
-        &mut self.mailbox
-    }
-
-    pub fn is_mailbox_closed(&self) -> bool {
-        self.mailbox.is_closed()
-    }
-
-    pub fn mailbox_sender(&self) -> Sender<Value> {
-        self.mailbox_sender.clone()
     }
 
     pub fn heap_references(&self) -> Vec<usize> {
@@ -269,7 +269,9 @@ impl Heap {
             let Some(object) = self.objects[address].as_ref() else {
                 continue;
             };
-            let external_incoming = object.ref_count().saturating_sub(internal_incoming[address]);
+            let external_incoming = object
+                .ref_count()
+                .saturating_sub(internal_incoming[address]);
             if external_incoming > 0 {
                 reachable[address] = true;
                 worklist.push_back(address);
