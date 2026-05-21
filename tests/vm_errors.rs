@@ -289,14 +289,14 @@ async fn spawn_send_and_receive_message_via_actor_handle() {
 }
 
 #[tokio::test]
-async fn receive_message_on_closed_mailbox_returns_disconnected_error() {
+async fn receive_message_without_external_senders_times_out() {
     let code = vec![OpCode::ReceiveMessage];
     let (mut vm, tx) = VM::new(code, None);
     drop(tx);
     let result = tokio::time::timeout(std::time::Duration::from_millis(50), vm.run()).await;
     assert!(
         result.is_err(),
-        "VM retains an internal sender, so receive waits for a future message"
+        "VM retains an internal sender, so ReceiveMessage blocks waiting for a future message"
     );
 }
 
