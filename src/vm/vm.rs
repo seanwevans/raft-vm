@@ -560,16 +560,30 @@ mod tests {
     #[tokio::test]
     async fn blocking_send_failure_releases_retained_message_reference() {
         use crate::vm::error::VmError;
+        use crate::vm::heap::ProcessHandle;
         use crate::vm::HeapObject;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
 
         let (mut vm, _tx) = VM::new(vec![OpCode::Return], None);
         let (sender, receiver) = mpsc::channel(1);
         drop(receiver);
 
-        let (actor_vm, actor_sender) = VM::new(vec![OpCode::Return], None);
-        let actor_addr = vm
-            .heap
-            .allocate(HeapObject::Actor(actor_vm, actor_sender, 0));
+        let (actor_sender, _actor_mailbox) = mpsc::channel(1);
+        let final_stack = Arc::new(Mutex::new(Vec::new()));
+        let task = tokio::spawn(async { Ok(()) });
+        let handle = ProcessHandle::new(
+            999,
+            None,
+            0,
+            Vec::new(),
+            None,
+            Vec::new(),
+            false,
+            task,
+            final_stack,
+        );
+        let actor_addr = vm.heap.allocate(HeapObject::Actor(handle, actor_sender, 0));
         let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
 
         if let Some(HeapObject::Array(_, rc)) = vm.heap.get_mut(message_addr) {
