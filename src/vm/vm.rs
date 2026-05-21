@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
+const REDUCTION_QUOTA: usize = 2_000;
 
 #[derive(Debug)]
 pub struct VM {
@@ -26,6 +27,7 @@ pub struct VM {
     restart_ip: usize,
     links: Vec<Sender<Value>>,
     trap_exits: bool,
+    reductions: usize,
     supervisor_state: SupervisorState,
     _supervisor: Option<Sender<usize>>,
 }
@@ -58,6 +60,7 @@ impl VM {
                 restart_ip: 0,
                 links: Vec::new(),
                 trap_exits: false,
+                reductions: 0,
                 supervisor_state: SupervisorState::default(),
                 _supervisor: supervisor,
             },
@@ -137,9 +140,16 @@ impl VM {
             );
 
             match state {
-                Ok(ExecutionState::Continue) => {}
+                Ok(ExecutionState::Continue) => {
+                    self.reductions += 1;
+                    if self.reductions >= REDUCTION_QUOTA {
+                        self.reductions = 0;
+                        tokio::task::yield_now().await;
+                    }
+                }
                 Ok(ExecutionState::Halted) => break,
                 Ok(ExecutionState::Yield(operation)) => {
+                    self.reductions = 0;
                     if let Err(e) = self.await_blocking_operation(operation).await {
                         log::error!("Execution error at ip {}: {}", self.execution.ip, e);
                         self.notify_links(&e).await;
