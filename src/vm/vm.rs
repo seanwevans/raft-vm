@@ -200,9 +200,6 @@ impl VM {
                     .recv()
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
-                if let Value::Reference(address) = message {
-                    self.release_reference(address)?;
-                }
                 self.push_runtime_value(message)
             }
             BlockingOperation::SendMessage {
@@ -278,6 +275,7 @@ impl VM {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn push_stack_value_for_test(&mut self, value: Value) {
         self.execution.stack.push(value);
     }
@@ -308,6 +306,14 @@ impl VM {
 
     pub fn trap_exits(&self) -> bool {
         self.trap_exits
+    }
+
+    pub fn reset_for_restart(&mut self, start_ip: usize) {
+        let bytecode = self.execution.bytecode.clone();
+        let debug_info = self.execution.debug_info.clone();
+        let (_tx, rx) = mpsc::channel(100);
+        self.execution = ExecutionContext::with_mailbox_and_debug(bytecode, rx, debug_info);
+        self.execution.ip = start_ip;
     }
 
     pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
@@ -529,7 +535,7 @@ mod tests {
         use crate::vm::error::VmError;
         use crate::vm::heap::ProcessHandle;
         use crate::vm::HeapObject;
-        use std::sync::Arc;
+        use std::sync::{Arc, Mutex};
         use tokio::sync::Mutex;
 
         let (mut vm, _tx) = VM::new(vec![OpCode::Return], None);
@@ -537,20 +543,25 @@ mod tests {
         drop(receiver);
 
         let (actor_sender, _actor_mailbox) = mpsc::channel(1);
-        let final_stack = Arc::new(Mutex::new(Vec::new()));
         let task = tokio::spawn(async { Ok(()) });
-        let handle = ProcessHandle::new(
-            999,
+        let (mailbox_sender, mailbox) = mpsc::channel(1);
+        let final_stack = Arc::new(Mutex::new(Vec::new()));
+        let actor_vm = ProcessHandle::new(
+            1,
             None,
             0,
-            Vec::new(),
+            vec![OpCode::Return],
             None,
             Vec::new(),
             false,
             task,
+            mailbox,
+            mailbox_sender,
             final_stack,
         );
-        let actor_addr = vm.heap.allocate(HeapObject::Actor(handle, actor_sender, 0));
+        let actor_addr = vm
+            .heap
+            .allocate(HeapObject::Actor(actor_vm, actor_sender, 0));
         let message_addr = vm.heap.allocate(HeapObject::Array(vec![], 0));
 
         if let Some(HeapObject::Array(_, rc)) = vm.heap.get_mut(message_addr) {

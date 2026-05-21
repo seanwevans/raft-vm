@@ -251,6 +251,43 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
 }
 
 #[tokio::test]
+async fn spawn_send_and_receive_message_via_actor_handle() {
+    let mut execution = ExecutionContext::new(vec![OpCode::Return]);
+    let mut heap = Heap::new();
+    OpCode::SpawnActor(0)
+        .execute(&mut execution, &mut heap)
+        .expect("spawn actor should succeed");
+    let actor_addr = match execution.stack.last().copied() {
+        Some(Value::Reference(addr)) => addr,
+        other => panic!("expected actor reference in stack, got {other:?}"),
+    };
+
+    OpCode::PushConst(Value::Integer(42))
+        .execute(&mut execution, &mut heap)
+        .expect("push message should succeed");
+    OpCode::Swap
+        .execute(&mut execution, &mut heap)
+        .expect("swap should arrange [message, actor_ref]");
+    OpCode::SendMessage
+        .execute(&mut execution, &mut heap)
+        .expect("send message should succeed");
+
+    let actor_vm = match heap.get_mut(actor_addr).expect("actor should exist") {
+        HeapObject::Actor(actor_vm, _, _) => actor_vm,
+        other => panic!("expected actor heap object, got {other:?}"),
+    };
+
+    actor_vm
+        .run()
+        .await
+        .expect("child actor should receive queued message");
+    assert_eq!(
+        actor_vm.pop_stack().expect("child stack should contain message"),
+        Value::Integer(42)
+    );
+}
+
+#[tokio::test]
 async fn receive_message_on_closed_mailbox_returns_disconnected_error() {
     let code = vec![OpCode::ReceiveMessage];
     let (mut vm, tx) = VM::new(code, None);
