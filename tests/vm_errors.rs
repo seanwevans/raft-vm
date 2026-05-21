@@ -1,6 +1,11 @@
 use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject, ProcessHandle};
-use raft::vm::{error::VmError, opcodes::OpCode, value::{MessageValue, Value}, vm::VM};
+use raft::vm::{
+    error::VmError,
+    opcodes::OpCode,
+    value::{MessageValue, Value},
+    vm::VM,
+};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::channel;
 

@@ -44,14 +44,7 @@ impl Actor {
 
     /// Send a message to the actor's mailbox.
     pub async fn send(&self, msg: Value) -> Result<(), VmError> {
-        let message = match msg {
-            Value::Integer(v) => MessageValue::Integer(v),
-            Value::Float(v) => MessageValue::Float(v),
-            Value::Boolean(v) => MessageValue::Boolean(v),
-            Value::ExitSignal(v) => MessageValue::ExitSignal(v),
-            Value::Null => MessageValue::Null,
-            Value::Reference(_) => return Err(VmError::TypeMismatch("Actor::send reference unsupported")),
-        };
+        let message = self.vm.value_to_message(msg)?;
         self.sender.send(message).await.map_err(|e| {
             let error = e.to_string();
             let value = match e.0 {
@@ -72,13 +65,17 @@ impl Actor {
 
     /// Receive the next message if available.
     pub async fn handle_next_message(&mut self) -> Option<Value> {
-        self.vm.mailbox_mut().recv().await.and_then(|message| match message {
-            MessageValue::Integer(v) => Some(Value::Integer(v)),
-            MessageValue::Float(v) => Some(Value::Float(v)),
-            MessageValue::Boolean(v) => Some(Value::Boolean(v)),
-            MessageValue::ExitSignal(v) => Some(Value::ExitSignal(v)),
-            MessageValue::Null => Some(Value::Null),
-            _ => None,
-        })
+        self.vm
+            .mailbox_mut()
+            .recv()
+            .await
+            .and_then(|message| match message {
+                MessageValue::Integer(v) => Some(Value::Integer(v)),
+                MessageValue::Float(v) => Some(Value::Float(v)),
+                MessageValue::Boolean(v) => Some(Value::Boolean(v)),
+                MessageValue::ExitSignal(v) => Some(Value::ExitSignal(v)),
+                MessageValue::Null => Some(Value::Null),
+                _ => None,
+            })
     }
 }
