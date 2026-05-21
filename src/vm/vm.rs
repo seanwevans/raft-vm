@@ -9,23 +9,18 @@ use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::supervision::{ExitReason, ExitSignal};
 use crate::vm::value::{MessageValue, Value};
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-thread_local! {
-    static NEXT_PROCESS_ID: Cell<usize> = const { Cell::new(1) };
-}
+static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
 const REDUCTION_QUOTA: usize = 2_000;
 
 fn allocate_process_id() -> Result<usize, VmError> {
-    NEXT_PROCESS_ID.with(|next| {
-        let process_id = next.get();
-        let next_id = process_id
-            .checked_add(1)
-            .ok_or(VmError::ProcessIdExhausted)?;
-        next.set(next_id);
-        Ok(process_id)
-    })
+    NEXT_PROCESS_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |process_id| {
+            process_id.checked_add(1)
+        })
+        .map_err(|_| VmError::ProcessIdExhausted)
 }
 
 #[derive(Debug)]
