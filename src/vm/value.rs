@@ -14,6 +14,18 @@ pub enum Value {
     Null,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageValue {
+    Integer(i32),
+    Float(f64),
+    Boolean(bool),
+    ExitSignal(ExitSignal),
+    Null,
+    Array(Vec<MessageValue>),
+    String(String),
+    Module(std::collections::HashMap<String, MessageValue>),
+}
+
 #[allow(clippy::should_implement_trait)]
 impl Value {
     pub fn checked_add(self, other: Value) -> Result<Value, VmError> {

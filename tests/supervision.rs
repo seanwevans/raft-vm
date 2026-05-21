@@ -1,5 +1,6 @@
 use raft::vm::execution::ExecutionContext;
 use raft::vm::heap::{Heap, HeapObject};
+use raft::vm::value::MessageValue;
 use raft::vm::{ExitReason, OpCode, SupervisorStrategy, Value, VmError, VM};
 
 #[tokio::test]
@@ -24,7 +25,7 @@ async fn linked_parent_receives_division_by_zero_exit_signal() {
         .await
         .expect("linked parent should receive an exit signal");
     match signal {
-        Value::ExitSignal(signal) => {
+        MessageValue::ExitSignal(signal) => {
             assert_eq!(signal.from, child.process_id());
             assert_eq!(signal.reason, ExitReason::DivisionByZero);
         }
@@ -54,7 +55,7 @@ async fn linked_parent_receives_type_mismatch_exit_signal() {
         .await
         .expect("linked parent should receive an exit signal");
     match signal {
-        Value::ExitSignal(signal) => {
+        MessageValue::ExitSignal(signal) => {
             assert_eq!(signal.from, child.process_id());
             assert_eq!(signal.reason, ExitReason::TypeMismatch);
         }

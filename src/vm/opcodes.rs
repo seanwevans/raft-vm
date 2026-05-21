@@ -4,7 +4,7 @@ use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState, ProcessContext};
 use crate::vm::heap::{Heap, HeapObject, NativeFunction, ProcessHandle};
 use crate::vm::supervision::ChildSpec;
-use crate::vm::value::Value;
+use crate::vm::value::{MessageValue, Value};
 use crate::vm::vm::VM;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::error::TrySendError;
@@ -94,8 +94,8 @@ fn spawn_child_vm(
     start_ip: usize,
     parent: Option<&ProcessContext>,
     trap_exits: bool,
-    links: Vec<tokio::sync::mpsc::Sender<Value>>,
-) -> Result<(ProcessHandle, tokio::sync::mpsc::Sender<Value>), VmError> {
+    links: Vec<tokio::sync::mpsc::Sender<MessageValue>>,
+) -> Result<(ProcessHandle, tokio::sync::mpsc::Sender<MessageValue>), VmError> {
     let (mut vm, tx) = VM::new_with_debug(bytecode, debug_info, None)?;
     vm.set_ip(start_ip);
     vm.set_restart_ip(start_ip);
@@ -746,7 +746,8 @@ impl OpCode {
             OpCode::ReceiveMessage => match execution.mailbox_mut().try_recv() {
                 Ok(message) => {
                     log::info!("Received message: {:?}", message);
-                    push_value(execution, heap, message)
+                    let value = heap.message_to_value(message)?;
+                    push_value(execution, heap, value)
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     return Ok(ExecutionState::Yield(BlockingOperation::ReceiveMessage));
@@ -810,7 +811,7 @@ impl OpCode {
                             release_value(heap, message)?;
                             Err(VmError::ChannelSend {
                                 error: "channel closed".to_string(),
-                                value: message,
+                                value: heap.message_to_value(message).unwrap_or(Value::Null),
                             })
                         }
                     }
