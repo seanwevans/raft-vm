@@ -188,7 +188,6 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
 
     let (dead_sender, dead_receiver) = channel::<Value>(1);
     drop(dead_receiver);
-    let (_mailbox_sender, mailbox) = channel::<Value>(1);
     let final_stack = Arc::new(Mutex::new(Vec::new()));
     let task = tokio::spawn(async { Ok(()) });
     let handle = ProcessHandle::new(
@@ -200,8 +199,6 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
         Vec::new(),
         false,
         task,
-        mailbox,
-        dead_sender.clone(),
         final_stack,
     );
     let actor_addr = heap.allocate(HeapObject::Actor(handle, dead_sender, 1));

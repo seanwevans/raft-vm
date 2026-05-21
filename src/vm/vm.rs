@@ -499,12 +499,29 @@ mod tests {
         vm.execution.step(&mut vm.heap).unwrap();
         vm.execution.step(&mut vm.heap).unwrap();
 
-        // Close actor mailbox to force send failure
+        // Swap actor sender with a closed channel to force send failure
         let actor_addr = match vm.execution.stack.last() {
             Some(Value::Reference(addr)) => *addr,
             other => panic!("Expected actor reference, got {:?}", other),
         };
         let _ = actor_addr;
+        if let Some(HeapObject::Actor(_, actor_sender, _)) = vm.heap.get_mut(actor_addr) {
+            let (closed_sender, closed_receiver) = mpsc::channel(1);
+            drop(closed_receiver);
+            *actor_sender = closed_sender;
+        } else {
+            panic!("Expected HeapObject::Actor");
+        }
+
+        // SendMessage should now fail
+        let result = vm.execution.step(&mut vm.heap);
+
+        match result {
+            Err(VmError::ChannelSend { value, .. }) => {
+                assert_eq!(value, Value::Null);
+            }
+            other => panic!("Expected ChannelSend error, got {:?}", other),
+        }
 
         if let Some(HeapObject::Actor(_, _, rc)) = vm.heap.get(actor_addr) {
             assert_eq!(
