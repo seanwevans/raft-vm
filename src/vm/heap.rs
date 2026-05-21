@@ -111,9 +111,6 @@ impl ProcessHandle {
         self.bytecode.clone()
     }
 
-    pub fn heap_references(&self) -> Vec<usize> {
-        Vec::new()
-    }
 
     pub fn debug_info(&self) -> Option<DebugInfo> {
         self.debug_info.clone()
@@ -249,6 +246,7 @@ impl Heap {
         self.objects.get_mut(address).and_then(Option::as_mut)
     }
 
+    #[allow(clippy::needless_range_loop)]
     pub fn collect_garbage(&mut self) {
         let object_count = self.objects.len();
         let mut internal_incoming = vec![0usize; object_count];
@@ -458,6 +456,7 @@ mod tests {
         let (actor_sender, _actor_mailbox) = tokio::sync::mpsc::channel(1);
         let final_stack = Arc::new(Mutex::new(vec![Value::Reference(array_address)]));
         let task = runtime.spawn(async { Ok(()) });
+        let (mailbox_sender, mailbox) = tokio::sync::mpsc::channel(1);
         let actor = ProcessHandle::new(
             1,
             None,
@@ -467,6 +466,8 @@ mod tests {
             Vec::new(),
             false,
             task,
+            mailbox,
+            mailbox_sender,
             final_stack,
         );
         let actor_address = heap.allocate(HeapObject::Actor(actor, actor_sender, 1));

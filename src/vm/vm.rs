@@ -199,9 +199,6 @@ impl VM {
                     .recv()
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
-                if let Value::Reference(address) = message {
-                    self.release_reference(address)?;
-                }
                 self.push_runtime_value(message)
             }
             BlockingOperation::SendMessage {
@@ -277,6 +274,7 @@ impl VM {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn push_stack_value_for_test(&mut self, value: Value) {
         self.execution.stack.push(value);
     }
@@ -307,32 +305,6 @@ impl VM {
 
     pub fn trap_exits(&self) -> bool {
         self.trap_exits
-    }
-
-    pub fn set_strategy(&mut self, strategy: usize) {
-        let strategy = SupervisorStrategy::from_usize(strategy);
-        self.supervisor_state.set_strategy(strategy);
-        log::info!("Set supervisor strategy to {:?}", strategy);
-    }
-
-    pub fn strategy(&self) -> SupervisorStrategy {
-        self.supervisor_state.strategy()
-    }
-
-    pub fn supervised_children(&self) -> &[ChildSpec] {
-        self.supervisor_state.children()
-    }
-
-    pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
-        self.supervisor_state.restart_targets(child)
-    }
-
-    pub fn restart_child(&mut self, child_ref: usize) {
-        self.supervisor_state.ensure_child(ChildSpec {
-            reference: child_ref,
-            start_ip: 0,
-        });
-        log::info!("Registered child {} for restart", child_ref);
     }
 
     pub fn reset_for_restart(&mut self, start_ip: usize) {
@@ -560,13 +532,31 @@ mod tests {
     #[tokio::test]
     async fn blocking_send_failure_releases_retained_message_reference() {
         use crate::vm::error::VmError;
+        use crate::vm::heap::ProcessHandle;
         use crate::vm::HeapObject;
+        use std::sync::{Arc, Mutex};
 
         let (mut vm, _tx) = VM::new(vec![OpCode::Return], None);
         let (sender, receiver) = mpsc::channel(1);
         drop(receiver);
 
-        let (actor_vm, actor_sender) = VM::new(vec![OpCode::Return], None);
+        let (actor_sender, _actor_mailbox) = mpsc::channel(1);
+        let task = tokio::spawn(async { Ok(()) });
+        let (mailbox_sender, mailbox) = mpsc::channel(1);
+        let final_stack = Arc::new(Mutex::new(Vec::new()));
+        let actor_vm = ProcessHandle::new(
+            1,
+            None,
+            0,
+            vec![OpCode::Return],
+            None,
+            Vec::new(),
+            false,
+            task,
+            mailbox,
+            mailbox_sender,
+            final_stack,
+        );
         let actor_addr = vm
             .heap
             .allocate(HeapObject::Actor(actor_vm, actor_sender, 0));

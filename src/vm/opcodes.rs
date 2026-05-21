@@ -43,6 +43,7 @@ fn increment_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
     }
 }
 
+#[allow(dead_code)]
 fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
     let child_references = if let Some(object) = heap.get_mut(address) {
         let child_references = match object {
