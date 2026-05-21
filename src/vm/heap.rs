@@ -122,13 +122,21 @@ impl ProcessHandle {
         self.trap_exits
     }
 
-    pub fn replace_task(&mut self, task: JoinHandle<Result<(), VmError>>, start_ip: usize) {
+    pub fn replace_runtime(
+        &mut self,
+        task: JoinHandle<Result<(), VmError>>,
+        start_ip: usize,
+        mailbox: Receiver<Value>,
+        mailbox_sender: Sender<Value>,
+    ) {
         if let Some(task) = &self.task {
             task.abort();
         }
         self.task = Some(task);
         self.start_ip = start_ip;
         self.current_ip = start_ip;
+        self.mailbox = mailbox;
+        self.mailbox_sender = mailbox_sender;
     }
 
     pub async fn run(&mut self) -> Result<(), VmError> {
@@ -255,7 +263,8 @@ impl Heap {
     }
 
     fn try_release(&mut self, address: usize) -> bool {
-        let should_release = matches!(self.objects.get(address), Some(Some(object)) if object.ref_count() == 0);
+        let should_release =
+            matches!(self.objects.get(address), Some(Some(object)) if object.ref_count() == 0);
         if !should_release {
             return false;
         }
