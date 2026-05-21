@@ -344,7 +344,6 @@ impl Heap {
         for child in child_references {
             self.release_reference(child)?;
         }
-        let _ = self.try_release(address);
         Ok(())
     }
 
