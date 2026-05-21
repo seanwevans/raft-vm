@@ -12,10 +12,28 @@ use crate::vm::supervision::{
 use crate::vm::value::Value;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
+static RECYCLED_PROCESS_IDS: LazyLock<Mutex<Vec<usize>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 const REDUCTION_QUOTA: usize = 2_000;
+
+fn allocate_process_id() -> usize {
+    if let Some(process_id) = RECYCLED_PROCESS_IDS
+        .lock()
+        .expect("recycled process id list lock poisoned")
+        .pop()
+    {
+        return process_id;
+    }
+
+    NEXT_PROCESS_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .expect("process id space exhausted and no recycled ids available")
+}
 
 #[derive(Debug)]
 pub struct VM {
@@ -55,7 +73,7 @@ impl VM {
                 execution,
                 heap,
                 self_sender: tx.clone(),
-                process_id: NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed),
+                process_id: allocate_process_id(),
                 parent: None,
                 restart_ip: 0,
                 links: Vec::new(),
@@ -360,6 +378,15 @@ impl VM {
                 log::warn!("Failed to deliver exit signal: {}", err);
             }
         }
+    }
+}
+
+impl Drop for VM {
+    fn drop(&mut self) {
+        RECYCLED_PROCESS_IDS
+            .lock()
+            .expect("recycled process id list lock poisoned")
+            .push(self.process_id);
     }
 }
 
