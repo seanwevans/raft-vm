@@ -186,7 +186,7 @@ impl VM {
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
                 if let Value::Reference(address) = message {
-                    self.decrement_reference(address)?;
+                    self.release_reference(address)?;
                 }
                 self.push_runtime_value(message)
             }
@@ -217,7 +217,7 @@ impl VM {
 
     fn release_runtime_value(&mut self, value: Value) -> Result<(), VmError> {
         if let Value::Reference(address) = value {
-            self.decrement_reference(address)?;
+            self.release_reference(address)?;
         }
         Ok(())
     }
@@ -231,8 +231,8 @@ impl VM {
         }
     }
 
-    fn decrement_reference(&mut self, address: usize) -> Result<(), VmError> {
-        if let Some(object) = self.heap.get_mut(address) {
+    fn release_reference(&mut self, address: usize) -> Result<(), VmError> {
+        if self.heap.get(address).is_some() {
             self.heap.release_reference(address)
         } else {
             Err(VmError::InvalidReference)
