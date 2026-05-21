@@ -46,7 +46,10 @@ async fn main() {
 }
 
 fn print_help() {
-    Cli::command().print_long_help().unwrap();
+    if let Err(e) = Cli::command().print_long_help() {
+        eprintln!("Failed to print help: {}", e);
+        process::exit(1);
+    }
     println!();
 }
 
@@ -93,7 +96,10 @@ async fn start_repl() {
         } else {
             print!("...> ");
         }
-        std::io::stdout().flush().unwrap();
+        if let Err(e) = std::io::stdout().flush() {
+            eprintln!("Output error: {}", e);
+            break;
+        }
         input.clear();
 
         if let Err(e) = reader.read_line(&mut input).await {
