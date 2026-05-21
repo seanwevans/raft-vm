@@ -6,9 +6,7 @@ use crate::vm::error::VmError;
 use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::opcodes::{Bytecode, OpCode};
-use crate::vm::supervision::{
-    ChildSpec, ExitReason, ExitSignal, SupervisorState, SupervisorStrategy,
-};
+use crate::vm::supervision::{ExitReason, ExitSignal};
 use crate::vm::value::Value;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,7 +26,6 @@ pub struct VM {
     links: Vec<Sender<Value>>,
     trap_exits: bool,
     reductions: usize,
-    supervisor_state: SupervisorState,
     _supervisor: Option<Sender<usize>>,
 }
 
@@ -61,7 +58,6 @@ impl VM {
                 links: Vec::new(),
                 trap_exits: false,
                 reductions: 0,
-                supervisor_state: SupervisorState::default(),
                 _supervisor: supervisor,
             },
             tx,
@@ -279,10 +275,6 @@ impl VM {
         self.self_sender.clone()
     }
 
-    pub fn replace_sender(&mut self, sender: Sender<Value>) {
-        self.self_sender = sender;
-    }
-
     pub fn link(&mut self, sender: Sender<Value>) {
         self.links.push(sender);
     }
@@ -297,40 +289,6 @@ impl VM {
 
     pub fn trap_exits(&self) -> bool {
         self.trap_exits
-    }
-
-    pub fn set_strategy(&mut self, strategy: usize) {
-        let strategy = SupervisorStrategy::from_usize(strategy);
-        self.supervisor_state.set_strategy(strategy);
-        log::info!("Set supervisor strategy to {:?}", strategy);
-    }
-
-    pub fn strategy(&self) -> SupervisorStrategy {
-        self.supervisor_state.strategy()
-    }
-
-    pub fn supervised_children(&self) -> &[ChildSpec] {
-        self.supervisor_state.children()
-    }
-
-    pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
-        self.supervisor_state.restart_targets(child)
-    }
-
-    pub fn restart_child(&mut self, child_ref: usize) {
-        self.supervisor_state.ensure_child(ChildSpec {
-            reference: child_ref,
-            start_ip: 0,
-        });
-        log::info!("Registered child {} for restart", child_ref);
-    }
-
-    pub fn reset_for_restart(&mut self, start_ip: usize) {
-        let bytecode = self.execution.bytecode.clone();
-        let debug_info = self.execution.debug_info.clone();
-        let (_tx, rx) = mpsc::channel(100);
-        self.execution = ExecutionContext::new_with_debug(bytecode, debug_info, rx);
-        self.execution.ip = start_ip;
     }
 
     pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
