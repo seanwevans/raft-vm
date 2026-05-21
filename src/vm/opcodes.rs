@@ -148,9 +148,15 @@ fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
             for link in process.links() {
                 vm.link(link);
             }
-            *sender = replacement_tx;
+            let replacement_mailbox = vm.take_mailbox();
+            *sender = replacement_tx.clone();
             let final_stack = Arc::new(Mutex::new(Vec::new()));
-            process.replace_task(run_process(vm, final_stack.clone()), child.start_ip);
+            process.replace_runtime(
+                run_process(vm, final_stack.clone()),
+                child.start_ip,
+                replacement_mailbox,
+                replacement_tx,
+            );
             log::info!(
                 "Restarted actor {} at ip {}",
                 child.reference,
