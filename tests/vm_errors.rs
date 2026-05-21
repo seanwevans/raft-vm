@@ -245,6 +245,20 @@ async fn send_message_failure_preserves_actor_on_stack_and_ref_counts() {
 }
 
 #[tokio::test]
+async fn receive_message_on_closed_mailbox_returns_disconnected_error() {
+    let code = vec![OpCode::ReceiveMessage];
+    let (mut vm, tx) = VM::new(code, None);
+    drop(tx);
+
+    let err = vm
+        .run()
+        .await
+        .expect_err("expected mailbox disconnected error");
+
+    assert!(matches!(err, VmError::MailboxDisconnected));
+}
+
+#[tokio::test]
 async fn top_level_return_gracefully_halts_vm() {
     let code = vec![OpCode::Return];
     let (mut vm, _tx) = VM::new(code, None);
