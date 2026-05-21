@@ -1,7 +1,7 @@
 // src/vm/heap.rs
 
 use crate::vm::error::VmError;
-use crate::vm::value::Value;
+use crate::vm::value::{MessageValue, Value};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
@@ -37,7 +37,7 @@ pub struct NativeFunction {
 /// A `ProcessHandle` represents a process that has been spawned onto the Tokio
 /// runtime. While the process is running, its mailbox is owned by the VM inside
 /// the spawned task; the handle does not provide a way to peek at or close the
-/// mailbox in-flight. To send messages, use the `Sender<Value>` stored
+/// mailbox in-flight. To send messages, use the `Sender<MessageValue>` stored
 /// alongside the handle in `HeapObject::Actor`.
 ///
 /// To inspect a process post-mortem, await [`ProcessHandle::run`] (which awaits
@@ -49,7 +49,7 @@ pub struct NativeFunction {
 /// can therefore provide live mailbox access.
 #[derive(Debug)]
 /// While a process is running, the only way to communicate with it from outside is via the
-/// `Sender<Value>` stored alongside the handle in `HeapObject::Actor`. The handle itself
+/// `Sender<MessageValue>` stored alongside the handle in `HeapObject::Actor`. The handle itself
 /// exposes no live mailbox view; the running VM owns it. Post-mortem state is available via
 /// `pop_stack` once `run` has been awaited.
 pub struct ProcessHandle {
@@ -59,7 +59,7 @@ pub struct ProcessHandle {
     current_ip: usize,
     bytecode: Vec<OpCode>,
     debug_info: Option<DebugInfo>,
-    links: Vec<Sender<Value>>,
+    links: Vec<Sender<MessageValue>>,
     trap_exits: bool,
     supervisor_state: SupervisorState,
     task: Option<JoinHandle<Result<(), VmError>>>,
@@ -76,8 +76,8 @@ pub enum HeapObject {
         ref_count: usize,
     },
     NativeFunction(NativeFunction, usize),
-    Actor(ProcessHandle, Sender<Value>, usize),
-    Supervisor(ProcessHandle, Sender<Value>, usize),
+    Actor(ProcessHandle, Sender<MessageValue>, usize),
+    Supervisor(ProcessHandle, Sender<MessageValue>, usize),
 }
 
 impl ProcessHandle {
@@ -88,7 +88,7 @@ impl ProcessHandle {
         start_ip: usize,
         bytecode: Vec<OpCode>,
         debug_info: Option<DebugInfo>,
-        links: Vec<Sender<Value>>,
+        links: Vec<Sender<MessageValue>>,
         trap_exits: bool,
         task: JoinHandle<Result<(), VmError>>,
         final_stack: Arc<Mutex<Vec<Value>>>,
@@ -136,7 +136,7 @@ impl ProcessHandle {
         self.debug_info.clone()
     }
 
-    pub fn links(&self) -> Vec<Sender<Value>> {
+    pub fn links(&self) -> Vec<Sender<MessageValue>> {
         self.links.clone()
     }
 
@@ -368,6 +368,72 @@ impl Heap {
         }
         true
     }
+
+    pub fn value_to_message(&self, value: Value) -> Result<MessageValue, VmError> {
+        match value {
+            Value::Integer(v) => Ok(MessageValue::Integer(v)),
+            Value::Float(v) => Ok(MessageValue::Float(v)),
+            Value::Boolean(v) => Ok(MessageValue::Boolean(v)),
+            Value::ExitSignal(v) => Ok(MessageValue::ExitSignal(v)),
+            Value::Null => Ok(MessageValue::Null),
+            Value::Reference(address) => self.reference_to_message(address),
+        }
+    }
+
+    fn reference_to_message(&self, address: usize) -> Result<MessageValue, VmError> {
+        match self.get(address).ok_or(VmError::InvalidReference)? {
+            HeapObject::Array(values, _) => Ok(MessageValue::Array(
+                values
+                    .iter()
+                    .map(|value| self.value_to_message(*value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            HeapObject::String(value, _) => Ok(MessageValue::String(value.clone())),
+            HeapObject::Module { exports, .. } => Ok(MessageValue::Module(
+                exports
+                    .iter()
+                    .map(|(k, v)| Ok((k.clone(), self.value_to_message(*v)?)))
+                    .collect::<Result<HashMap<_, _>, VmError>>()?,
+            )),
+            HeapObject::NativeFunction(_, _) | HeapObject::Actor(_, _, _) | HeapObject::Supervisor(_, _, _) => {
+                Err(VmError::TypeMismatch("SendMessage unsupported reference type"))
+            }
+        }
+    }
+
+    pub fn message_to_value(&mut self, message: MessageValue) -> Result<Value, VmError> {
+        match message {
+            MessageValue::Integer(v) => Ok(Value::Integer(v)),
+            MessageValue::Float(v) => Ok(Value::Float(v)),
+            MessageValue::Boolean(v) => Ok(Value::Boolean(v)),
+            MessageValue::ExitSignal(v) => Ok(Value::ExitSignal(v)),
+            MessageValue::Null => Ok(Value::Null),
+            MessageValue::String(v) => {
+                let address = self.allocate(HeapObject::String(v, 1));
+                Ok(Value::Reference(address))
+            }
+            MessageValue::Array(values) => {
+                let materialized = values
+                    .into_iter()
+                    .map(|value| self.message_to_value(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let address = self.allocate(HeapObject::Array(materialized, 1));
+                Ok(Value::Reference(address))
+            }
+            MessageValue::Module(exports) => {
+                let materialized_exports = exports
+                    .into_iter()
+                    .map(|(k, v)| Ok((k, self.message_to_value(v)?)))
+                    .collect::<Result<HashMap<_, _>, VmError>>()?;
+                let address = self.allocate(HeapObject::Module {
+                    name: "message_module".to_string(),
+                    exports: materialized_exports,
+                    ref_count: 1,
+                });
+                Ok(Value::Reference(address))
+            }
+        }
+    }
 }
 
 impl HeapObject {
@@ -458,7 +524,6 @@ mod tests {
         let (actor_sender, _actor_mailbox) = tokio::sync::mpsc::channel(1);
         let final_stack = Arc::new(Mutex::new(vec![Value::Reference(array_address)]));
         let task = runtime.spawn(async { Ok(()) });
-        let (mailbox_sender, mailbox) = tokio::sync::mpsc::channel(1);
         let actor = ProcessHandle::new(
             1,
             None,
@@ -468,8 +533,6 @@ mod tests {
             Vec::new(),
             false,
             task,
-            mailbox,
-            mailbox_sender,
             final_stack,
         );
         let actor_address = heap.allocate(HeapObject::Actor(actor, actor_sender, 1));

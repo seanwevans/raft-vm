@@ -3,14 +3,14 @@
 use tokio::sync::mpsc::Sender;
 
 use crate::vm::error::VmError;
-use crate::vm::value::Value;
+use crate::vm::value::{MessageValue, Value};
 use crate::vm::{OpCode, VM};
 
 /// A lightweight wrapper around a `VM` that exposes a mailbox
 /// for message passing.
 pub struct Actor {
     vm: VM,
-    sender: Sender<Value>,
+    sender: Sender<MessageValue>,
 }
 
 impl Actor {
@@ -21,7 +21,7 @@ impl Actor {
     }
 
     /// Obtain a sender that can be used to send messages to this actor.
-    pub fn sender(&self) -> Sender<Value> {
+    pub fn sender(&self) -> Sender<MessageValue> {
         self.sender.clone()
     }
 
@@ -44,9 +44,23 @@ impl Actor {
 
     /// Send a message to the actor's mailbox.
     pub async fn send(&self, msg: Value) -> Result<(), VmError> {
-        self.sender.send(msg).await.map_err(|e| {
+        let message = match msg {
+            Value::Integer(v) => MessageValue::Integer(v),
+            Value::Float(v) => MessageValue::Float(v),
+            Value::Boolean(v) => MessageValue::Boolean(v),
+            Value::ExitSignal(v) => MessageValue::ExitSignal(v),
+            Value::Null => MessageValue::Null,
+            Value::Reference(_) => return Err(VmError::TypeMismatch("Actor::send reference unsupported")),
+        };
+        self.sender.send(message).await.map_err(|e| {
             let error = e.to_string();
-            let value = e.0;
+            let value = match e.0 {
+                MessageValue::Integer(v) => Value::Integer(v),
+                MessageValue::Float(v) => Value::Float(v),
+                MessageValue::Boolean(v) => Value::Boolean(v),
+                MessageValue::ExitSignal(v) => Value::ExitSignal(v),
+                _ => Value::Null,
+            };
             VmError::ChannelSend { error, value }
         })
     }
@@ -58,6 +72,13 @@ impl Actor {
 
     /// Receive the next message if available.
     pub async fn handle_next_message(&mut self) -> Option<Value> {
-        self.vm.mailbox_mut().recv().await
+        self.vm.mailbox_mut().recv().await.and_then(|message| match message {
+            MessageValue::Integer(v) => Some(Value::Integer(v)),
+            MessageValue::Float(v) => Some(Value::Float(v)),
+            MessageValue::Boolean(v) => Some(Value::Boolean(v)),
+            MessageValue::ExitSignal(v) => Some(Value::ExitSignal(v)),
+            MessageValue::Null => Some(Value::Null),
+            _ => None,
+        })
     }
 }

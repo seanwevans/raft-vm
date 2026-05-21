@@ -6,7 +6,7 @@ use crate::compiler::DebugInfo;
 use crate::vm::error::VmError;
 use crate::vm::heap::Heap;
 use crate::vm::opcodes::{Bytecode, OpCode};
-use crate::vm::value::Value;
+use crate::vm::value::{MessageValue, Value};
 
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -14,9 +14,9 @@ use tokio::sync::mpsc::{Receiver, Sender};
 pub enum BlockingOperation {
     ReceiveMessage,
     SendMessage {
-        sender: Sender<Value>,
+        sender: Sender<MessageValue>,
         actor_address: usize,
-        message: Value,
+        message: MessageValue,
     },
 }
 
@@ -30,7 +30,7 @@ pub enum ExecutionState {
 #[derive(Debug, Clone)]
 pub struct ProcessContext {
     pub process_id: usize,
-    pub self_sender: Sender<Value>,
+    pub self_sender: Sender<MessageValue>,
     pub trap_exits: bool,
 }
 
@@ -43,7 +43,7 @@ pub struct ExecutionContext {
     pub call_stack: Vec<usize>,
     pub bytecode: Bytecode,
     pub debug_info: Option<DebugInfo>,
-    pub mailbox: Receiver<Value>,
+    pub mailbox: Receiver<MessageValue>,
 }
 
 impl ExecutionContext {
@@ -52,7 +52,7 @@ impl ExecutionContext {
         Self::with_mailbox(bytecode, rx)
     }
 
-    pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<Value>) -> Self {
+    pub fn with_mailbox(bytecode: impl Into<Bytecode>, mailbox: Receiver<MessageValue>) -> Self {
         Self {
             stack: Vec::new(),
             locals: HashMap::new(),
@@ -72,7 +72,7 @@ impl ExecutionContext {
 
     pub fn with_mailbox_and_debug(
         bytecode: impl Into<Bytecode>,
-        mailbox: Receiver<Value>,
+        mailbox: Receiver<MessageValue>,
         debug_info: Option<DebugInfo>,
     ) -> Self {
         Self {
@@ -95,7 +95,7 @@ impl ExecutionContext {
         &mut self,
         heap: &mut Heap,
         process_id: usize,
-        self_sender: Sender<Value>,
+        self_sender: Sender<MessageValue>,
         trap_exits: bool,
     ) -> Result<ExecutionState, VmError> {
         self.step_inner(
@@ -149,7 +149,7 @@ impl ExecutionContext {
         }
     }
 
-    pub fn mailbox_mut(&mut self) -> &mut Receiver<Value> {
+    pub fn mailbox_mut(&mut self) -> &mut Receiver<MessageValue> {
         &mut self.mailbox
     }
 
