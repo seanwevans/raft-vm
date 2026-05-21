@@ -21,7 +21,7 @@ async fn actor_reference_lifecycle_on_stack() {
         .execute(&mut execution, &mut heap)
         .unwrap();
 
-    let address = match execution.stack.last().copied() {
+    let address = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("Expected actor reference on stack, got {other:?}"),
     };
@@ -51,7 +51,7 @@ async fn send_and_receive_message_updates_reference_counts() {
     OpCode::SpawnActor(0)
         .execute(&mut execution, &mut heap)
         .unwrap();
-    let actor_a = match execution.stack.last().copied() {
+    let actor_a = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         _ => panic!("Expected actor reference for target"),
     };
@@ -149,7 +149,7 @@ async fn neg_type_mismatch_consumes_reference_operand() {
         .execute(&mut execution, &mut heap)
         .unwrap();
 
-    let address = match execution.stack.last().copied() {
+    let address = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("Expected actor reference on stack, got {other:?}"),
     };
@@ -171,7 +171,7 @@ async fn add_and_mod_type_mismatch_do_not_leak_references() {
     OpCode::SpawnActor(0)
         .execute(&mut execution, &mut heap)
         .unwrap();
-    let add_ref = match execution.stack.last().copied() {
+    let add_ref = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("Expected actor reference on stack, got {other:?}"),
     };
@@ -188,7 +188,7 @@ async fn add_and_mod_type_mismatch_do_not_leak_references() {
     OpCode::SpawnActor(0)
         .execute(&mut execution, &mut heap)
         .unwrap();
-    let mod_ref = match execution.stack.last().copied() {
+    let mod_ref = match execution.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("Expected actor reference on stack, got {other:?}"),
     };

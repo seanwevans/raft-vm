@@ -384,14 +384,14 @@ impl Heap {
             HeapObject::Array(values, _) => Ok(MessageValue::Array(
                 values
                     .iter()
-                    .map(|value| self.value_to_message(*value))
+                    .map(|value| self.value_to_message(value.clone()))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             HeapObject::String(value, _) => Ok(MessageValue::String(value.clone())),
             HeapObject::Module { exports, .. } => Ok(MessageValue::Module(
                 exports
                     .iter()
-                    .map(|(k, v)| Ok((k.clone(), self.value_to_message(*v)?)))
+                    .map(|(k, v)| Ok((k.clone(), self.value_to_message(v.clone())?)))
                     .collect::<Result<HashMap<_, _>, VmError>>()?,
             )),
             HeapObject::NativeFunction(_, _) | HeapObject::Actor(_, _, _) | HeapObject::Supervisor(_, _, _) => {

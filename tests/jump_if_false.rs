@@ -50,7 +50,7 @@ async fn jump_if_false_drops_reference_on_type_mismatch() {
 
     OpCode::SpawnActor(0).execute(&mut ctx, &mut heap).unwrap();
 
-    let address = match ctx.stack.last().copied() {
+    let address = match ctx.stack.last().cloned() {
         Some(Value::Reference(addr)) => addr,
         other => panic!("Expected actor reference on stack, got {other:?}"),
     };

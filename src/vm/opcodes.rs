@@ -50,7 +50,7 @@ fn decrement_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
             HeapObject::Array(elements, rc) if *rc == 1 => elements.clone(),
             HeapObject::Module {
                 exports, ref_count, ..
-            } if *ref_count == 1 => exports.values().copied().collect(),
+            } if *ref_count == 1 => exports.values().cloned().collect(),
             _ => Vec::new(),
         };
         object.decrement_ref();
@@ -207,9 +207,9 @@ fn expect_usize(value: Value, operation: &'static str) -> Result<usize, VmError>
     }
 }
 
-fn retain_value(heap: &mut Heap, value: Value) -> Result<(), VmError> {
+fn retain_value(heap: &mut Heap, value: &Value) -> Result<(), VmError> {
     if let Value::Reference(address) = value {
-        increment_reference(heap, address)?;
+        increment_reference(heap, *address)?;
     }
     Ok(())
 }
@@ -237,7 +237,7 @@ fn make_array(
     elements.reverse();
 
     for value in &elements {
-        retain_value(heap, *value)?;
+        retain_value(heap, &value)?;
     }
 
     let address = heap.allocate(HeapObject::Array(elements, 0));
@@ -252,7 +252,7 @@ fn array_get(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), Vm
             Some(HeapObject::Array(elements, _)) => {
                 elements
                     .get(index)
-                    .copied()
+                    .cloned()
                     .ok_or(VmError::IndexOutOfBounds {
                         index,
                         length: elements.len(),
@@ -276,7 +276,7 @@ fn array_set(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), Vm
         _ => return Err(VmError::TypeMismatch("ArraySet")),
     };
 
-    retain_value(heap, new_value)?;
+    retain_value(heap, &new_value)?;
     let old_value = match heap.get_mut(address) {
         Some(HeapObject::Array(elements, _)) => {
             if index >= elements.len() {
@@ -341,7 +341,7 @@ fn make_module(
 
     let mut exports = std::collections::HashMap::with_capacity(names.len());
     for (name, value) in names.iter().cloned().zip(values.into_iter()) {
-        retain_value(heap, value)?;
+        retain_value(heap, &value)?;
         exports.insert(name, value);
     }
 
@@ -363,14 +363,14 @@ fn module_get(
         Value::Reference(address) => match heap.get(address) {
             Some(HeapObject::Module { exports, .. }) => exports
                 .get(name)
-                .copied()
+                .cloned()
                 .ok_or_else(|| VmError::Message(format!("Module export not found: {name}")))?,
             _ => return Err(VmError::InvalidReference),
         },
         _ => return Err(VmError::TypeMismatch("ModuleGet")),
     };
     release_value(heap, module_ref)?;
-    push_value(execution, heap, value)
+    push_value(execution, heap, value.clone())
 }
 
 fn module_set(
@@ -385,7 +385,7 @@ fn module_set(
         _ => return Err(VmError::TypeMismatch("ModuleSet")),
     };
 
-    retain_value(heap, new_value)?;
+    retain_value(heap, &new_value)?;
     let old_value = match heap.get_mut(address) {
         Some(HeapObject::Module { exports, .. }) => exports.insert(name.to_string(), new_value),
         _ => {
@@ -577,15 +577,15 @@ impl OpCode {
                 Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(VmError::TypeMismatch("Neg")),
             }),
-            OpCode::PushConst(v) => push_value(execution, heap, *v),
+            OpCode::PushConst(v) => push_value(execution, heap, v.clone()),
             OpCode::MakeArray(length) => make_array(execution, heap, *length),
             OpCode::Pop => {
                 pop_value(execution, heap)?;
                 Ok(())
             }
             OpCode::Dup => {
-                if let Some(&value) = execution.stack.last() {
-                    push_value(execution, heap, value)
+                if let Some(value) = execution.stack.last() {
+                    push_value(execution, heap, value.clone())
                 } else {
                     Err(VmError::StackUnderflow)
                 }
@@ -601,7 +601,7 @@ impl OpCode {
             OpCode::StoreVar(index) => {
                 let value = pop_value(execution, heap)?;
 
-                if let Some(Value::Reference(address)) = execution.locals.insert(*index, value) {
+                if let Some(Value::Reference(address)) = execution.locals.insert(*index, value.clone()) {
                     heap.release_reference(address)?;
                 }
 
@@ -613,7 +613,7 @@ impl OpCode {
             }
             OpCode::LoadVar(index) => {
                 if let Some(value) = execution.locals.get(index) {
-                    push_value(execution, heap, *value)
+                    push_value(execution, heap, value.clone())
                 } else {
                     Err(VmError::VariableNotFound(*index))
                 }
@@ -622,9 +622,9 @@ impl OpCode {
                 let value = execution
                     .globals
                     .get(name)
-                    .copied()
+                    .cloned()
                     .ok_or_else(|| VmError::GlobalNotFound(name.clone()))?;
-                push_value(execution, heap, value)
+                push_value(execution, heap, value.clone())
             }
             OpCode::GetExport(export) => {
                 let module_ref = pop_value(execution, heap)?;
@@ -634,7 +634,7 @@ impl OpCode {
 
                 let (module_name, value) = match heap.get(address) {
                     Some(HeapObject::Module { name, exports, .. }) => {
-                        let value = exports.get(export).copied().ok_or_else(|| {
+                        let value = exports.get(export).cloned().ok_or_else(|| {
                             VmError::ExportNotFound {
                                 module: name.clone(),
                                 export: export.clone(),
@@ -646,7 +646,7 @@ impl OpCode {
                 };
 
                 log::info!("Loaded export {} from module {}", export, module_name);
-                push_value(execution, heap, value)
+                push_value(execution, heap, value.clone())
             }
             OpCode::Mod => binary_op(execution, heap, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
@@ -747,7 +747,7 @@ impl OpCode {
                 Ok(message) => {
                     log::info!("Received message: {:?}", message);
                     let value = heap.message_to_value(message)?;
-                    push_value(execution, heap, value)
+                    push_value(execution, heap, value.clone())
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     return Ok(ExecutionState::Yield(BlockingOperation::ReceiveMessage));
@@ -792,7 +792,7 @@ impl OpCode {
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    let message_for_channel = heap.value_to_message(message)?;
+                    let message_for_channel = heap.value_to_message(message.clone())?;
                     match sender.try_send(message_for_channel) {
                         Ok(()) => {
                             push_existing_value(execution, message);
@@ -908,7 +908,7 @@ mod heap_opcode_tests {
             .execute(&mut execution, &mut heap)
             .unwrap();
 
-        let array_addr = match execution.stack.last().copied() {
+        let array_addr = match execution.stack.last().cloned() {
             Some(Value::Reference(address)) => address,
             other => panic!("expected array reference, got {other:?}"),
         };
@@ -954,7 +954,7 @@ mod heap_opcode_tests {
             .execute(&mut execution, &mut heap)
             .unwrap();
 
-        let address = match execution.stack.last().copied() {
+        let address = match execution.stack.last().cloned() {
             Some(Value::Reference(address)) => address,
             other => panic!("expected string reference, got {other:?}"),
         };

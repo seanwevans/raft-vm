@@ -103,7 +103,7 @@ impl VM {
     }
 
     pub fn global(&self, name: &str) -> Option<Value> {
-        self.execution.globals().get(name).copied()
+        self.execution.globals().get(name).cloned()
     }
 
     pub fn heap_ref_count(&self, address: usize) -> Option<usize> {
