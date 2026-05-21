@@ -194,7 +194,6 @@ impl VM {
                 Ok(()) => self.push_runtime_value(Value::Reference(actor_address)),
                 Err(err) => {
                     let error = err.to_string();
-                    let _value = err.0;
                     self.push_runtime_value(Value::Reference(actor_address))?;
                     Err(VmError::ChannelSend {
                         error,
