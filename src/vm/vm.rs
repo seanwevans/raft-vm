@@ -14,23 +14,28 @@ use std::sync::{LazyLock, Mutex};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
+/// Recycled process IDs shared across the entire OS process.
+///
+/// This currently assumes a single embedding context per OS process.
+/// Runtime-scoped process ID allocation is planned to avoid collisions
+/// when multiple embedded runtimes coexist in one host process.
 static RECYCLED_PROCESS_IDS: LazyLock<Mutex<Vec<usize>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 const REDUCTION_QUOTA: usize = 2_000;
 
-fn allocate_process_id() -> usize {
+fn allocate_process_id() -> Result<usize, VmError> {
     if let Some(process_id) = RECYCLED_PROCESS_IDS
         .lock()
         .expect("recycled process id list lock poisoned")
         .pop()
     {
-        return process_id;
+        return Ok(process_id);
     }
 
     NEXT_PROCESS_ID
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(1)
         })
-        .expect("process id space exhausted and no recycled ids available")
+        .map_err(|_| VmError::ProcessIdExhausted)
 }
 
 #[derive(Debug)]
@@ -50,13 +55,14 @@ pub struct VM {
 impl VM {
     pub fn new(bytecode: Vec<OpCode>, supervisor: Option<Sender<usize>>) -> (Self, Sender<Value>) {
         Self::new_with_debug(bytecode, None, supervisor)
+            .expect("failed to allocate process id for VM")
     }
 
     pub fn new_with_debug(
         bytecode: impl Into<Bytecode>,
         debug_info: Option<DebugInfo>,
         supervisor: Option<Sender<usize>>,
-    ) -> (Self, Sender<Value>) {
+    ) -> Result<(Self, Sender<Value>), VmError> {
         let (tx, rx) = mpsc::channel(100);
         let bytecode: Bytecode = bytecode.into();
         log::info!("Initializing VM with {} opcodes", bytecode.len());
@@ -65,12 +71,12 @@ impl VM {
         let mut heap = Heap::new();
         stdlib::install(&mut heap, &mut execution);
 
-        (
+        Ok((
             VM {
                 execution,
                 heap,
                 self_sender: tx.clone(),
-                process_id: allocate_process_id(),
+                process_id: allocate_process_id()?,
                 parent: None,
                 restart_ip: 0,
                 links: Vec::new(),
@@ -79,7 +85,7 @@ impl VM {
                 _supervisor: supervisor,
             },
             tx,
-        )
+        ))
     }
 
     pub fn pop_stack(&mut self) -> Result<Value, VmError> {

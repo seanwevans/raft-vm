@@ -94,8 +94,8 @@ fn spawn_child_vm(
     parent: Option<&ProcessContext>,
     trap_exits: bool,
     links: Vec<tokio::sync::mpsc::Sender<Value>>,
-) -> (ProcessHandle, tokio::sync::mpsc::Sender<Value>) {
-    let (mut vm, tx) = VM::new_with_debug(bytecode, debug_info, None);
+) -> Result<(ProcessHandle, tokio::sync::mpsc::Sender<Value>), VmError> {
+    let (mut vm, tx) = VM::new_with_debug(bytecode, debug_info, None)?;
     vm.set_ip(start_ip);
     vm.set_restart_ip(start_ip);
     vm.set_trap_exits(trap_exits);
@@ -134,14 +134,20 @@ fn spawn_child_vm(
             final_stack,
         )
     };
-    (handle, tx)
+    Ok((handle, tx))
 }
 
 fn restart_actor(heap: &mut Heap, child: ChildSpec) -> Result<(), VmError> {
     match heap.get_mut(child.reference) {
         Some(HeapObject::Actor(process, sender, _)) => {
             let (mut vm, replacement_tx) =
-                VM::new_with_debug(process.bytecode(), process.debug_info(), None);
+                match VM::new_with_debug(process.bytecode(), process.debug_info(), None) {
+                    Ok(vm) => vm,
+                    Err(error) => {
+                        log::error!("Failed to restart actor VM: {}", error);
+                        return Err(error);
+                    }
+                };
             vm.set_ip(child.start_ip);
             vm.set_restart_ip(child.start_ip);
             vm.set_trap_exits(process.trap_exits());
@@ -472,7 +478,10 @@ impl Bytecode {
     }
 
     pub fn opcodes(&self) -> Vec<OpCode> {
-        self.opcodes.iter().map(|opcode| opcode.as_ref().clone()).collect()
+        self.opcodes
+            .iter()
+            .map(|opcode| opcode.as_ref().clone())
+            .collect()
     }
 }
 
@@ -761,7 +770,7 @@ impl OpCode {
                     process.as_ref(),
                     false,
                     Vec::new(),
-                );
+                )?;
                 let address = heap.allocate(HeapObject::Actor(handle, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
             }
@@ -817,7 +826,7 @@ impl OpCode {
                     process.as_ref(),
                     true,
                     Vec::new(),
-                );
+                )?;
                 let address = heap.allocate(HeapObject::Supervisor(handle, tx, 0));
                 push_value(execution, heap, Value::Reference(address))
             }
