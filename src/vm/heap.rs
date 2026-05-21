@@ -2,7 +2,7 @@
 
 use crate::vm::error::VmError;
 use crate::vm::value::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
@@ -246,14 +246,80 @@ impl Heap {
     }
 
     pub fn collect_garbage(&mut self) {
-        let mut reclaimed = 0usize;
-        for address in 0..self.objects.len() {
-            if self.try_release(address) {
-                reclaimed += 1;
+        let object_count = self.objects.len();
+        let mut internal_incoming = vec![0usize; object_count];
+
+        for address in 0..object_count {
+            let Some(object) = self.objects[address].as_ref() else {
+                continue;
+            };
+            for child in object.references() {
+                if child < object_count && self.objects[child].is_some() {
+                    internal_incoming[child] += 1;
+                }
             }
         }
+
+        let mut reachable = vec![false; object_count];
+        let mut worklist = VecDeque::new();
+
+        for address in 0..object_count {
+            let Some(object) = self.objects[address].as_ref() else {
+                continue;
+            };
+            let external_incoming = object.ref_count().saturating_sub(internal_incoming[address]);
+            if external_incoming > 0 {
+                reachable[address] = true;
+                worklist.push_back(address);
+            }
+        }
+
+        while let Some(address) = worklist.pop_front() {
+            let Some(object) = self.objects[address].as_ref() else {
+                continue;
+            };
+            for child in object.references() {
+                if child < object_count && self.objects[child].is_some() && !reachable[child] {
+                    reachable[child] = true;
+                    worklist.push_back(child);
+                }
+            }
+        }
+
+        let mut pending_release = VecDeque::new();
+        for address in 0..object_count {
+            if self.objects[address].is_some() && !reachable[address] {
+                pending_release.push_back(address);
+            }
+        }
+
+        let mut reclaimed = 0usize;
+        while let Some(address) = pending_release.pop_front() {
+            if self.try_release(address) {
+                reclaimed += 1;
+                continue;
+            }
+
+            let child_references = self
+                .objects
+                .get(address)
+                .and_then(|object| object.as_ref())
+                .map(|object| object.references())
+                .unwrap_or_default();
+
+            self.objects[address] = None;
+            self.free_list.push(address);
+            reclaimed += 1;
+
+            for child in child_references {
+                if self.release_reference(child).is_ok() && self.try_release(child) {
+                    pending_release.push_back(child);
+                }
+            }
+        }
+
         if reclaimed > 0 {
-            log::info!("Reclaimed {} zero-ref heap objects", reclaimed);
+            log::info!("Reclaimed {} unreachable heap objects", reclaimed);
         }
     }
 
