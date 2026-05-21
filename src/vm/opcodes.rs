@@ -181,6 +181,10 @@ fn push_value(
     Ok(())
 }
 
+fn push_existing_value(execution: &mut ExecutionContext, value: Value) {
+    execution.stack.push(value);
+}
+
 fn pop_value(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<Value, VmError> {
     if let Some(value) = execution.stack.pop() {
         if let Value::Reference(address) = value {
@@ -190,6 +194,10 @@ fn pop_value(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<Value,
     } else {
         Err(VmError::StackUnderflow)
     }
+}
+
+fn pop_raw_value(execution: &mut ExecutionContext) -> Result<Value, VmError> {
+    execution.stack.pop().ok_or(VmError::StackUnderflow)
 }
 
 fn expect_usize(value: Value, operation: &'static str) -> Result<usize, VmError> {
@@ -238,7 +246,7 @@ fn make_array(
 
 fn array_get(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), VmError> {
     let index = expect_usize(pop_value(execution, heap)?, "ArrayGet")?;
-    let array_ref = pop_value(execution, heap)?;
+    let array_ref = pop_raw_value(execution)?;
     let element = match array_ref {
         Value::Reference(address) => match heap.get(address) {
             Some(HeapObject::Array(elements, _)) => {
@@ -255,13 +263,14 @@ fn array_get(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), Vm
         _ => return Err(VmError::TypeMismatch("ArrayGet")),
     };
 
+    release_value(heap, array_ref)?;
     push_value(execution, heap, element)
 }
 
 fn array_set(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), VmError> {
     let new_value = pop_value(execution, heap)?;
     let index = expect_usize(pop_value(execution, heap)?, "ArraySet")?;
-    let array_ref = pop_value(execution, heap)?;
+    let array_ref = pop_raw_value(execution)?;
     let address = match array_ref {
         Value::Reference(address) => address,
         _ => return Err(VmError::TypeMismatch("ArraySet")),
@@ -284,12 +293,13 @@ fn array_set(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), Vm
     };
     release_value(heap, old_value)?;
 
-    push_value(execution, heap, Value::Reference(address))
+    push_existing_value(execution, Value::Reference(address));
+    Ok(())
 }
 
 fn string_concat(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), VmError> {
-    let rhs = pop_value(execution, heap)?;
-    let lhs = pop_value(execution, heap)?;
+    let rhs = pop_raw_value(execution)?;
+    let lhs = pop_raw_value(execution)?;
 
     let mut concatenated = match lhs {
         Value::Reference(address) => match heap.get(address) {
@@ -306,6 +316,9 @@ fn string_concat(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<()
         },
         _ => return Err(VmError::TypeMismatch("StringConcat")),
     }
+
+    release_value(heap, lhs)?;
+    release_value(heap, rhs)?;
 
     let address = heap.allocate(HeapObject::String(concatenated, 0));
     push_value(execution, heap, Value::Reference(address))
@@ -345,7 +358,7 @@ fn module_get(
     heap: &mut Heap,
     name: &str,
 ) -> Result<(), VmError> {
-    let module_ref = pop_value(execution, heap)?;
+    let module_ref = pop_raw_value(execution)?;
     let value = match module_ref {
         Value::Reference(address) => match heap.get(address) {
             Some(HeapObject::Module { exports, .. }) => exports
@@ -356,6 +369,7 @@ fn module_get(
         },
         _ => return Err(VmError::TypeMismatch("ModuleGet")),
     };
+    release_value(heap, module_ref)?;
     push_value(execution, heap, value)
 }
 
@@ -365,7 +379,7 @@ fn module_set(
     name: &str,
 ) -> Result<(), VmError> {
     let new_value = pop_value(execution, heap)?;
-    let module_ref = pop_value(execution, heap)?;
+    let module_ref = pop_raw_value(execution)?;
     let address = match module_ref {
         Value::Reference(address) => address,
         _ => return Err(VmError::TypeMismatch("ModuleSet")),
@@ -768,17 +782,24 @@ impl OpCode {
                 // SendMessage has stack-stable behavior for actor references:
                 // the actor reference is present on the stack after the opcode
                 // finishes, regardless of success or failure.
-                let actor_ref = pop_value(execution, heap)?;
+                let actor_ref = pop_raw_value(execution)?;
                 let message = pop_value(execution, heap)?;
                 if let Value::Reference(address) = actor_ref {
                     let sender = match heap.get(address) {
                         Some(HeapObject::Actor(_, sender, _)) => sender.clone(),
                         _ => return Err(VmError::InvalidReference),
                     };
-                    let outbound = heap.value_to_message(message)?;
-                    match sender.try_send(outbound) {
-                        Ok(()) => push_value(execution, heap, Value::Reference(address)),
+                    if let Value::Reference(message_address) = message {
+                        increment_reference(heap, message_address)?;
+                    }
+                    match sender.try_send(message) {
+                        Ok(()) => {
+                            push_existing_value(execution, message);
+                            push_existing_value(execution, Value::Reference(address));
+                            Ok(())
+                        }
                         Err(TrySendError::Full(message)) => {
+                            release_value(heap, actor_ref)?;
                             return Ok(ExecutionState::Yield(BlockingOperation::SendMessage {
                                 sender,
                                 actor_address: address,
@@ -786,7 +807,8 @@ impl OpCode {
                             }));
                         }
                         Err(TrySendError::Closed(message)) => {
-                            push_value(execution, heap, Value::Reference(address))?;
+                            push_existing_value(execution, Value::Reference(address));
+                            release_value(heap, message)?;
                             Err(VmError::ChannelSend {
                                 error: "channel closed".to_string(),
                                 value: heap.message_to_value(message).unwrap_or(Value::Null),

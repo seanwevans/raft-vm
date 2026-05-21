@@ -9,33 +9,23 @@ use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::supervision::{ExitReason, ExitSignal};
 use crate::vm::value::{MessageValue, Value};
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::cell::Cell;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
-static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
-/// Recycled process IDs shared across the entire OS process.
-///
-/// This currently assumes a single embedding context per OS process.
-/// Runtime-scoped process ID allocation is planned to avoid collisions
-/// when multiple embedded runtimes coexist in one host process.
-static RECYCLED_PROCESS_IDS: LazyLock<Mutex<Vec<usize>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+thread_local! {
+    static NEXT_PROCESS_ID: Cell<usize> = const { Cell::new(1) };
+}
 const REDUCTION_QUOTA: usize = 2_000;
 
 fn allocate_process_id() -> Result<usize, VmError> {
-    if let Some(process_id) = RECYCLED_PROCESS_IDS
-        .lock()
-        .expect("recycled process id list lock poisoned")
-        .pop()
-    {
-        return Ok(process_id);
-    }
-
-    NEXT_PROCESS_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current.checked_add(1)
-        })
-        .map_err(|_| VmError::ProcessIdExhausted)
+    NEXT_PROCESS_ID.with(|next| {
+        let process_id = next.get();
+        let next_id = process_id
+            .checked_add(1)
+            .ok_or(VmError::ProcessIdExhausted)?;
+        next.set(next_id);
+        Ok(process_id)
+    })
 }
 
 #[derive(Debug)]
@@ -343,15 +333,6 @@ impl VM {
                 log::warn!("Failed to deliver exit signal: {}", err);
             }
         }
-    }
-}
-
-impl Drop for VM {
-    fn drop(&mut self) {
-        RECYCLED_PROCESS_IDS
-            .lock()
-            .expect("recycled process id list lock poisoned")
-            .push(self.process_id);
     }
 }
 
