@@ -599,11 +599,7 @@ impl OpCode {
                 Ok(())
             }
             OpCode::StoreVar(index) => {
-                let value = pop_value(execution, heap)?;
-
-                if let Some(Value::Reference(address)) = execution.locals.insert(*index, value.clone()) {
-                    heap.release_reference(address)?;
-                }
+                let value = pop_raw_value(execution)?;
 
                 if let Some(previous) = execution.locals.insert(*index, value) {
                     release_value(heap, previous)?;
@@ -794,6 +790,7 @@ impl OpCode {
                     let message_for_channel = heap.value_to_message(message.clone())?;
                     match sender.try_send(message_for_channel) {
                         Ok(()) => {
+                            release_value(heap, message)?;
                             push_existing_value(execution, Value::Reference(address));
                             Ok(())
                         }
@@ -1020,13 +1017,13 @@ mod heap_opcode_tests {
         OpCode::MakeString("child".to_string())
             .execute(&mut execution, &mut heap)
             .unwrap();
-        let child_address = match execution.stack.last().copied() {
+        let child_address = match execution.stack.last().cloned() {
             Some(Value::Reference(address)) => address,
             other => panic!("expected child string reference on stack, got {other:?}"),
         };
 
         OpCode::MakeArray(1).execute(&mut execution, &mut heap).unwrap();
-        let parent_address = match execution.stack.last().copied() {
+        let parent_address = match execution.stack.last().cloned() {
             Some(Value::Reference(address)) => address,
             other => panic!("expected parent array reference on stack, got {other:?}"),
         };
