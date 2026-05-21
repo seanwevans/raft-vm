@@ -66,9 +66,10 @@ impl ProcessHandle {
         links: Vec<Sender<Value>>,
         trap_exits: bool,
         task: JoinHandle<Result<(), VmError>>,
+        mailbox: Receiver<Value>,
+        mailbox_sender: Sender<Value>,
         final_stack: Arc<Mutex<Vec<Value>>>,
     ) -> Self {
-        let (mailbox_sender, mailbox) = tokio::sync::mpsc::channel(1);
         Self {
             process_id,
             parent,

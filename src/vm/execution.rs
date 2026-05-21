@@ -178,5 +178,4 @@ impl ExecutionContext {
     pub fn globals_mut(&mut self) -> &mut HashMap<String, Value> {
         &mut self.globals
     }
-
 }

@@ -117,6 +117,7 @@ fn spawn_child_vm(
         let debug_info = vm.debug_info();
         let links = vm.links();
         let trap_exits = vm.trap_exits();
+        let mailbox = vm.take_mailbox();
         let final_stack = Arc::new(Mutex::new(Vec::new()));
         let task = run_process(vm, final_stack.clone());
         ProcessHandle::new(
@@ -128,6 +129,8 @@ fn spawn_child_vm(
             links,
             trap_exits,
             task,
+            mailbox,
+            tx.clone(),
             final_stack,
         )
     };
@@ -1002,26 +1005,15 @@ impl OpCode {
                 let actor_ref = pop_value(execution, heap)?;
                 let message = pop_value(execution, heap)?;
                 if let Value::Reference(address) = actor_ref {
-                    let (sender, mailbox_closed, compatibility_sender) = match heap.get(address) {
-                        Some(HeapObject::Actor(process, sender, _)) => (
-                            sender.clone(),
-                            process.is_mailbox_closed(),
-                            process.mailbox_sender(),
-                        ),
+                    let sender = match heap.get(address) {
+                        Some(HeapObject::Actor(_, sender, _)) => sender.clone(),
                         _ => return Err(VmError::InvalidReference),
                     };
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    match if mailbox_closed {
-                        Err(TrySendError::Closed(message))
-                    } else {
-                        sender.try_send(message)
-                    } {
-                        Ok(()) => {
-                            let _ = compatibility_sender.try_send(message);
-                            push_value(execution, heap, Value::Reference(address))
-                        }
+                    match sender.try_send(message) {
+                        Ok(()) => push_value(execution, heap, Value::Reference(address)),
                         Err(TrySendError::Full(message)) => {
                             return Ok(ExecutionState::Yield(BlockingOperation::SendMessage {
                                 sender,
