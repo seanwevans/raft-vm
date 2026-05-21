@@ -792,7 +792,8 @@ impl OpCode {
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    match sender.try_send(message) {
+                    let message_for_channel = heap.value_to_message(message)?;
+                    match sender.try_send(message_for_channel) {
                         Ok(()) => {
                             push_existing_value(execution, message);
                             push_existing_value(execution, Value::Reference(address));
@@ -806,12 +807,14 @@ impl OpCode {
                                 message,
                             }));
                         }
-                        Err(TrySendError::Closed(message)) => {
+                        Err(TrySendError::Closed(message_for_channel)) => {
                             push_existing_value(execution, Value::Reference(address));
                             release_value(heap, message)?;
                             Err(VmError::ChannelSend {
                                 error: "channel closed".to_string(),
-                                value: heap.message_to_value(message).unwrap_or(Value::Null),
+                                value: heap
+                                    .message_to_value(message_for_channel)
+                                    .unwrap_or(Value::Null),
                             })
                         }
                     }
