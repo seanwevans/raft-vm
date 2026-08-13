@@ -92,6 +92,10 @@ Pop
 true 3.14
 ```
 
+Numbers may be negative: `-5` and `-3.14` are literals. Because Raft is postfix,
+subtraction always follows its two operands (`5 3 -`) and is never written flush
+against a number, so there is no ambiguity between the two.
+
 The compiler now uses a lexer/parser pipeline that supports integers, floats,
 booleans (`true`/`false`), string literals with spaces (for example,
 `"hello raft vm"`), `#` and `//` comments, textual labels such as `.loop`,
