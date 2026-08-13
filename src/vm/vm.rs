@@ -211,8 +211,10 @@ impl VM {
                     .recv()
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
+                // Already counted for this stack slot by `message_to_value`.
                 let value = self.heap.message_to_value(message)?;
-                self.push_runtime_value(value)
+                self.execution.stack.push(value);
+                Ok(())
             }
             BlockingOperation::SendMessage {
                 sender,
