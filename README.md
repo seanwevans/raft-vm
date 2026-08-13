@@ -134,11 +134,42 @@ without adding dedicated I/O bytecode instructions.
 ### Opcodes
 Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Arithmetic**: `Add`, `Sub`, `Mul`, `Div`, `Mod`, `Neg`, `Exp`
+- **Comparison**: `Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`
+- **Logic**: `Not`, `And`, `Or`
 - **Stack**: `PushConst`, `Pop`, `Dup`, `Swap`
 - **Modules/Globals**: `LoadGlobal`, `GetExport`, `CallNative`
 - **Control Flow**: `Jump`, `JumpIfFalse`, `Call`, `CallNative`, `Return`
 - **Actor Management**: `SpawnActor`, `SendMessage`, `ReceiveMessage`
 - **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
+
+### Comparison and control flow
+Comparisons push a boolean, which is what `JumpIfFalse` branches on. `Eq` and
+`Ne` are defined for every pair of values -- comparing across types answers
+`false` rather than failing, and two references are equal when they name the
+same heap object. The ordering operators (`Lt`, `Le`, `Gt`, `Ge`) require two
+integers or two floats, since ordering across types has no meaning.
+
+`Not`, `And` and `Or` take booleans. They cannot short-circuit: both operands
+are already on the stack by the time the operator runs.
+
+Together these make a loop that exits on a computed value expressible:
+
+```
+0 StoreVar 0        # total
+5 StoreVar 1        # counter
+
+.loop
+LoadVar 1 0 Gt      # counter > 0 ?
+JumpIfFalse .done
+  LoadVar 0 LoadVar 1 + StoreVar 0
+  LoadVar 1 1 - StoreVar 1
+Jump .loop
+
+.done
+LoadVar 0 io.print CallNative 1
+```
+
+See `examples/loop.raft`, which prints `15`.
 
 ---
 

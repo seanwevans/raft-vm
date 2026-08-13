@@ -1,0 +1,19 @@
+# A counted loop: sum 1..5 and print the total.
+#
+# The loop exits on a comparison of a value the program computed, which is what
+# Lt/Gt/Eq and friends make possible.
+
+# slot 0: running total, slot 1: counter
+0 StoreVar 0
+5 StoreVar 1
+
+.loop
+LoadVar 1 0 Gt
+JumpIfFalse .done
+  LoadVar 0 LoadVar 1 + StoreVar 0
+  LoadVar 1 1 - StoreVar 1
+Jump .loop
+
+.done
+LoadVar 0
+io.print CallNative 1
