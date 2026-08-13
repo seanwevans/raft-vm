@@ -6,6 +6,7 @@ use crate::vm::heap::{Heap, HeapObject, NativeFunction, ProcessHandle};
 use crate::vm::supervision::ChildSpec;
 use crate::vm::value::{MessageValue, Value};
 use crate::vm::vm::VM;
+use std::cmp::Ordering;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -32,6 +33,45 @@ where
     let result = f(a, b)?;
     execution.stack.push(result);
     Ok(())
+}
+
+/// Order two values of the same numeric type.
+///
+/// Ordering is only defined within a type, so mixed or non-numeric operands are
+/// a type error rather than an arbitrary ranking. Equality is separate: it is
+/// defined for every pair of values.
+fn compare(a: Value, b: Value, operation: &'static str) -> Result<std::cmp::Ordering, VmError> {
+    match (a, b) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(a.cmp(&b)),
+        (Value::Float(a), Value::Float(b)) => {
+            a.partial_cmp(&b).ok_or(VmError::NotOrderable(operation))
+        }
+        _ => Err(VmError::TypeMismatch(operation)),
+    }
+}
+
+fn ordering_op<F>(
+    execution: &mut ExecutionContext,
+    heap: &mut Heap,
+    operation: &'static str,
+    accept: F,
+) -> Result<(), VmError>
+where
+    F: Fn(std::cmp::Ordering) -> bool,
+{
+    binary_op(execution, heap, move |a, b| {
+        Ok(Value::Boolean(accept(compare(a, b, operation)?)))
+    })
+}
+
+fn logical_op<F>(execution: &mut ExecutionContext, heap: &mut Heap, f: F) -> Result<(), VmError>
+where
+    F: Fn(bool, bool) -> bool,
+{
+    binary_op(execution, heap, move |a, b| match (a, b) {
+        (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(f(a, b))),
+        _ => Err(VmError::TypeMismatch("logical operation")),
+    })
 }
 
 fn increment_reference(heap: &mut Heap, address: usize) -> Result<(), VmError> {
@@ -521,6 +561,19 @@ pub enum OpCode {
     Neg,
     Exp,
 
+    // Comparison
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+
+    // Logic
+    Not,
+    And,
+    Or,
+
     // Heap values
     ArrayGet,
     ArraySet,
@@ -578,6 +631,25 @@ impl OpCode {
                 Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(VmError::TypeMismatch("Neg")),
             }),
+
+            // Equality is structural for scalars and identity for references:
+            // two references are equal when they name the same heap object.
+            OpCode::Eq => binary_op(execution, heap, |a, b| Ok(Value::Boolean(a == b))),
+            OpCode::Ne => binary_op(execution, heap, |a, b| Ok(Value::Boolean(a != b))),
+            OpCode::Lt => ordering_op(execution, heap, "Lt", Ordering::is_lt),
+            OpCode::Le => ordering_op(execution, heap, "Le", Ordering::is_le),
+            OpCode::Gt => ordering_op(execution, heap, "Gt", Ordering::is_gt),
+            OpCode::Ge => ordering_op(execution, heap, "Ge", Ordering::is_ge),
+
+            OpCode::Not => unary_op(execution, heap, |a| match a {
+                Value::Boolean(value) => Ok(Value::Boolean(!value)),
+                _ => Err(VmError::TypeMismatch("Not")),
+            }),
+            // Both operands are already on the stack, so these cannot
+            // short-circuit the way a `&&` in source would.
+            OpCode::And => logical_op(execution, heap, |a, b| a && b),
+            OpCode::Or => logical_op(execution, heap, |a, b| a || b),
+
             OpCode::PushConst(v) => push_value(execution, heap, v.clone()),
             OpCode::MakeArray(length) => make_array(execution, heap, *length),
             OpCode::Pop => {
