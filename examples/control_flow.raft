@@ -1,1 +1,25 @@
-1 JumpIfFalse 4 Call 6 Jump 8 Return
+# Control flow: an unconditional jump, a subroutine call, and a branch.
+
+# Jump over the subroutine body so it runs only when called.
+Jump .main
+
+# double: replaces the top of the stack with twice its value
+.double
+Dup
++
+Return
+
+.main
+# 21 doubled is 42
+21
+Call .double
+io.print CallNative 1
+
+# JumpIfFalse takes a boolean: true falls through, false jumps to .done.
+true
+JumpIfFalse .done
+99
+io.print CallNative 1
+
+.done
+Return

@@ -112,6 +112,15 @@ pub enum Instruction {
     Mod,
     Neg,
     Exp,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Not,
+    And,
+    Or,
     Jump(AddressOperand),
     JumpIfFalse(AddressOperand),
     Call(AddressOperand),
@@ -121,6 +130,7 @@ pub enum Instruction {
     ReceiveMessage,
     SpawnSupervisor(AddressOperand),
     SetStrategy(usize),
+    SuperviseChild(usize),
     RestartChild(usize),
 }
 
@@ -161,6 +171,13 @@ impl<'a> Lexer<'a> {
                 '#' => self.skip_line_comment(),
                 '/' if self.peek_next_char() == Some('/') => self.skip_line_comment(),
                 '"' => tokens.push(self.lex_string()?),
+                // `-` immediately followed by a digit starts a negative
+                // literal. Raft is postfix, so subtraction always follows its
+                // two operands and is never written flush against a number:
+                // `5 3 -` subtracts, `-3` is the literal.
+                '-' if self.peek_next_char().is_some_and(|ch| ch.is_ascii_digit()) => {
+                    tokens.push(self.lex_word()?)
+                }
                 '+' | '-' | '*' | '/' | '%' | '^' => tokens.push(self.lex_symbol()),
                 _ => tokens.push(self.lex_word()?),
             };
@@ -401,6 +418,15 @@ impl Parser {
             "Mod" => Instruction::Mod,
             "Neg" => Instruction::Neg,
             "Exp" => Instruction::Exp,
+            "Eq" => Instruction::Eq,
+            "Ne" => Instruction::Ne,
+            "Lt" => Instruction::Lt,
+            "Le" => Instruction::Le,
+            "Gt" => Instruction::Gt,
+            "Ge" => Instruction::Ge,
+            "Not" => Instruction::Not,
+            "And" => Instruction::And,
+            "Or" => Instruction::Or,
             "Jump" => Instruction::Jump(self.expect_address("Jump")?),
             "JumpIfFalse" => Instruction::JumpIfFalse(self.expect_address("JumpIfFalse")?),
             "Call" => Instruction::Call(self.expect_address("Call")?),
@@ -412,6 +438,9 @@ impl Parser {
                 Instruction::SpawnSupervisor(self.expect_address("SpawnSupervisor")?)
             }
             "SetStrategy" => Instruction::SetStrategy(self.expect_usize("SetStrategy")?),
+            "SuperviseChild" => {
+                Instruction::SuperviseChild(self.expect_usize("SuperviseChild")?)
+            }
             "RestartChild" => Instruction::RestartChild(self.expect_usize("RestartChild")?),
             _ => return Err(CompilerError::InvalidToken(identifier.to_string())),
         };
@@ -623,6 +652,15 @@ fn emit_instruction(
         Instruction::Mod => OpCode::Mod,
         Instruction::Neg => OpCode::Neg,
         Instruction::Exp => OpCode::Exp,
+        Instruction::Eq => OpCode::Eq,
+        Instruction::Ne => OpCode::Ne,
+        Instruction::Lt => OpCode::Lt,
+        Instruction::Le => OpCode::Le,
+        Instruction::Gt => OpCode::Gt,
+        Instruction::Ge => OpCode::Ge,
+        Instruction::Not => OpCode::Not,
+        Instruction::And => OpCode::And,
+        Instruction::Or => OpCode::Or,
         Instruction::Jump(address) => OpCode::Jump(resolve_address(address, labels)?),
         Instruction::JumpIfFalse(address) => OpCode::JumpIfFalse(resolve_address(address, labels)?),
         Instruction::Call(address) => OpCode::Call(resolve_address(address, labels)?),
@@ -634,6 +672,7 @@ fn emit_instruction(
             OpCode::SpawnSupervisor(resolve_address(address, labels)?)
         }
         Instruction::SetStrategy(strategy) => OpCode::SetStrategy(strategy),
+        Instruction::SuperviseChild(child) => OpCode::SuperviseChild(child),
         Instruction::RestartChild(child) => OpCode::RestartChild(child),
     };
     push(bytecode, spans, opcode, span);
