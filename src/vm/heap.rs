@@ -347,6 +347,14 @@ impl Heap {
         Ok(())
     }
 
+    /// Reclaim `address` if its count has already reached zero.
+    ///
+    /// An object at zero gave up its children when the count reached zero, in
+    /// `release_reference`. Releasing them again here would take a second
+    /// reference the object never held -- dropping a value some other root
+    /// still points at. Only the unreachable-but-counted objects reclaimed by
+    /// the sweep in `collect_garbage`, which still hold their children, are
+    /// released from.
     fn try_release(&mut self, address: usize) -> bool {
         let should_release =
             matches!(self.objects.get(address), Some(Some(object)) if object.ref_count() == 0);
@@ -354,17 +362,8 @@ impl Heap {
             return false;
         }
 
-        let child_references = self
-            .objects
-            .get(address)
-            .and_then(|object| object.as_ref())
-            .map(|object| object.references())
-            .unwrap_or_default();
         self.objects[address] = None;
         self.free_list.push(address);
-        for child in child_references {
-            let _ = self.release_reference(child);
-        }
         true
     }
 
