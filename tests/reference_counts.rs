@@ -175,7 +175,9 @@ async fn send_message_full_releases_reference_message_before_yield() {
         .execute(&mut execution, &mut heap)
         .unwrap();
 
-    let state = OpCode::SendMessage.execute(&mut execution, &mut heap).unwrap();
+    let state = OpCode::SendMessage
+        .execute(&mut execution, &mut heap)
+        .unwrap();
     assert!(
         matches!(state, raft::vm::execution::ExecutionState::Yield(_)),
         "expected SendMessage to yield when channel is full"
