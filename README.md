@@ -178,6 +178,33 @@ Build the project in release mode:
 cargo build --release
 ```
 
+## Benchmarks
+Raft uses [Criterion](https://github.com/bheisler/criterion.rs) for
+statistics-driven benchmarking. Run everything, or one target at a time:
+
+```bash
+cargo bench                      # all benchmarks
+cargo bench --bench interpreter  # opcode dispatch, control flow, messaging
+cargo bench --bench heap         # allocation, collection, message conversion
+cargo bench --bench compiler     # lexing, parsing, emission, label resolution
+```
+
+Filter to a single measurement by name, and shorten the sampling window while
+iterating:
+
+```bash
+cargo bench --bench heap -- collect_garbage --measurement-time 2
+```
+
+Criterion compares each run against the previous one stored in
+`target/criterion`, reporting the change and whether it is statistically
+significant. To check only that the benchmarks still build, use
+`cargo bench --no-run`.
+
+Benchmarks that allocate take a fresh `Heap` per iteration. Sharing one lets an
+allocating program grow it without bound across the measurement, which measures
+heap growth rather than the operation under test.
+
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request.
 
