@@ -150,6 +150,22 @@ Run the test suite with Cargo:
 cargo test
 ```
 
+### Property tests
+`tests/properties.rs` runs generated programs -- both random opcode sequences
+and structured fragments -- through the compiler and interpreter, asserting
+that they always answer with a `VmError` or a clean halt, never panic, and never
+leave a root pointing at a reclaimed object. They run as part of `cargo test`.
+
+To search harder than the default 256 cases per property:
+
+```bash
+PROPTEST_CASES=20000 cargo test --test properties
+```
+
+Inputs that have failed before are recorded in
+`tests/properties.proptest-regressions` and replayed on every run, so keep that
+file in source control.
+
 Build the project in release mode:
 
 ```bash
