@@ -121,6 +121,7 @@ pub enum Instruction {
     ReceiveMessage,
     SpawnSupervisor(AddressOperand),
     SetStrategy(usize),
+    SuperviseChild(usize),
     RestartChild(usize),
 }
 
@@ -161,6 +162,13 @@ impl<'a> Lexer<'a> {
                 '#' => self.skip_line_comment(),
                 '/' if self.peek_next_char() == Some('/') => self.skip_line_comment(),
                 '"' => tokens.push(self.lex_string()?),
+                // `-` immediately followed by a digit starts a negative
+                // literal. Raft is postfix, so subtraction always follows its
+                // two operands and is never written flush against a number:
+                // `5 3 -` subtracts, `-3` is the literal.
+                '-' if self.peek_next_char().is_some_and(|ch| ch.is_ascii_digit()) => {
+                    tokens.push(self.lex_word()?)
+                }
                 '+' | '-' | '*' | '/' | '%' | '^' => tokens.push(self.lex_symbol()),
                 _ => tokens.push(self.lex_word()?),
             };
@@ -412,6 +420,9 @@ impl Parser {
                 Instruction::SpawnSupervisor(self.expect_address("SpawnSupervisor")?)
             }
             "SetStrategy" => Instruction::SetStrategy(self.expect_usize("SetStrategy")?),
+            "SuperviseChild" => {
+                Instruction::SuperviseChild(self.expect_usize("SuperviseChild")?)
+            }
             "RestartChild" => Instruction::RestartChild(self.expect_usize("RestartChild")?),
             _ => return Err(CompilerError::InvalidToken(identifier.to_string())),
         };
@@ -634,6 +645,7 @@ fn emit_instruction(
             OpCode::SpawnSupervisor(resolve_address(address, labels)?)
         }
         Instruction::SetStrategy(strategy) => OpCode::SetStrategy(strategy),
+        Instruction::SuperviseChild(child) => OpCode::SuperviseChild(child),
         Instruction::RestartChild(child) => OpCode::RestartChild(child),
     };
     push(bytecode, spans, opcode, span);

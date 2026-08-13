@@ -35,6 +35,10 @@ pub enum VmError {
     ExportNotFound { module: String, export: String },
     #[error("Invalid reference")]
     InvalidReference,
+    #[error("Cyclic reference through heap address {0} cannot be converted to a message")]
+    CyclicReference(usize),
+    #[error("Value nesting exceeds the maximum message depth of {0}")]
+    MessageTooDeep(usize),
     #[error("Index out of bounds: index {index}, length {length}")]
     IndexOutOfBounds { index: usize, length: usize },
     #[error("Native arity mismatch: expected {expected}, got {actual}")]

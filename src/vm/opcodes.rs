@@ -205,9 +205,12 @@ fn make_array(
         return Err(VmError::StackUnderflowFor("MakeArray"));
     }
 
+    // The stack's reference to each element moves into the array, so pop
+    // without releasing. Releasing first can cascade into the element's own
+    // children, and re-retaining the element afterwards does not undo that.
     let mut elements = Vec::with_capacity(length);
     for _ in 0..length {
-        elements.push(pop_value(execution, heap)?);
+        elements.push(pop_raw_value(execution)?);
     }
     elements.reverse();
 
@@ -238,20 +241,27 @@ fn array_get(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), Vm
         _ => return Err(VmError::TypeMismatch("ArrayGet")),
     };
 
+    // Retain the element before releasing the array: the array may hold its
+    // last reference, and releasing it first would drop the element with it.
+    retain_value(heap, &element)?;
     release_value(heap, array_ref)?;
-    push_value(execution, heap, element)
+    push_existing_value(execution, element);
+    Ok(())
 }
 
 fn array_set(execution: &mut ExecutionContext, heap: &mut Heap) -> Result<(), VmError> {
-    let new_value = pop_value(execution, heap)?;
+    // The stack's reference to the new value moves into the array.
+    let new_value = pop_raw_value(execution)?;
     let index = expect_usize(pop_value(execution, heap)?, "ArraySet")?;
     let array_ref = pop_raw_value(execution)?;
     let address = match array_ref {
         Value::Reference(address) => address,
-        _ => return Err(VmError::TypeMismatch("ArraySet")),
+        _ => {
+            release_value(heap, new_value)?;
+            return Err(VmError::TypeMismatch("ArraySet"));
+        }
     };
 
-    retain_value(heap, &new_value)?;
     let old_value = match heap.get_mut(address) {
         Some(HeapObject::Array(elements, _)) => {
             if index >= elements.len() {
@@ -308,16 +318,21 @@ fn make_module(
         return Err(VmError::StackUnderflowFor("MakeModule"));
     }
 
+    // As with MakeArray, the stack's reference to each export moves into the
+    // module rather than being released and re-taken.
     let mut values = Vec::with_capacity(names.len());
     for _ in names {
-        values.push(pop_value(execution, heap)?);
+        values.push(pop_raw_value(execution)?);
     }
     values.reverse();
 
     let mut exports = std::collections::HashMap::with_capacity(names.len());
     for (name, value) in names.iter().cloned().zip(values.into_iter()) {
-        retain_value(heap, &value)?;
-        exports.insert(name, value);
+        if let Some(replaced) = exports.insert(name, value) {
+            // Duplicate export names in one MakeModule: only the last value is
+            // reachable, so the shadowed one gives up its reference here.
+            release_value(heap, replaced)?;
+        }
     }
 
     let address = heap.allocate(HeapObject::Module {
@@ -344,8 +359,12 @@ fn module_get(
         },
         _ => return Err(VmError::TypeMismatch("ModuleGet")),
     };
+    // Retain before releasing the module, which may hold the export's last
+    // reference.
+    retain_value(heap, &value)?;
     release_value(heap, module_ref)?;
-    push_value(execution, heap, value.clone())
+    push_existing_value(execution, value);
+    Ok(())
 }
 
 fn module_set(
@@ -353,14 +372,17 @@ fn module_set(
     heap: &mut Heap,
     name: &str,
 ) -> Result<(), VmError> {
-    let new_value = pop_value(execution, heap)?;
+    // The stack's reference to the new value moves into the module.
+    let new_value = pop_raw_value(execution)?;
     let module_ref = pop_raw_value(execution)?;
     let address = match module_ref {
         Value::Reference(address) => address,
-        _ => return Err(VmError::TypeMismatch("ModuleSet")),
+        _ => {
+            release_value(heap, new_value)?;
+            return Err(VmError::TypeMismatch("ModuleSet"));
+        }
     };
 
-    retain_value(heap, &new_value)?;
     let old_value = match heap.get_mut(address) {
         Some(HeapObject::Module { exports, .. }) => exports.insert(name.to_string(), new_value),
         _ => {
@@ -372,7 +394,10 @@ fn module_set(
         release_value(heap, old_value)?;
     }
 
-    push_value(execution, heap, Value::Reference(address))
+    // The module reference was popped without releasing, so hand the same
+    // count back rather than taking another.
+    push_existing_value(execution, Value::Reference(address));
+    Ok(())
 }
 
 fn native_function_at(
@@ -522,6 +547,7 @@ pub enum OpCode {
     // Supervisor
     SpawnSupervisor(usize),
     SetStrategy(usize),
+    SuperviseChild(usize),
     RestartChild(usize),
 }
 
@@ -598,7 +624,7 @@ impl OpCode {
                 push_value(execution, heap, value.clone())
             }
             OpCode::GetExport(export) => {
-                let module_ref = pop_value(execution, heap)?;
+                let module_ref = pop_raw_value(execution)?;
                 let Value::Reference(address) = module_ref else {
                     return Err(VmError::InvalidReference);
                 };
@@ -617,7 +643,11 @@ impl OpCode {
                 };
 
                 log::info!("Loaded export {} from module {}", export, module_name);
-                push_value(execution, heap, value.clone())
+                // Retain the export before releasing the module it came from.
+                retain_value(heap, &value)?;
+                release_value(heap, module_ref)?;
+                push_existing_value(execution, value);
+                Ok(())
             }
             OpCode::Mod => binary_op(execution, heap, |a, b| match (a, b) {
                 (Value::Integer(x), Value::Integer(y)) => {
@@ -717,8 +747,11 @@ impl OpCode {
             OpCode::ReceiveMessage => match execution.mailbox_mut().try_recv() {
                 Ok(message) => {
                     log::info!("Received message: {:?}", message);
+                    // The materialized value already carries a count for this
+                    // stack slot; retaining again would strand it forever.
                     let value = heap.message_to_value(message)?;
-                    push_value(execution, heap, value.clone())
+                    push_existing_value(execution, value);
+                    Ok(())
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
                     return Ok(ExecutionState::Yield(BlockingOperation::ReceiveMessage));
@@ -762,7 +795,17 @@ impl OpCode {
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    let message_for_channel = heap.value_to_message(message.clone())?;
+                    let message_for_channel = match heap.value_to_message(message.clone()) {
+                        Ok(message_for_channel) => message_for_channel,
+                        // A value the mailbox cannot represent (cyclic, too
+                        // deeply nested, or an unsendable handle) fails the
+                        // send without stranding the reference retained above.
+                        Err(error) => {
+                            push_existing_value(execution, Value::Reference(address));
+                            release_value(heap, message)?;
+                            return Err(error);
+                        }
+                    };
                     match sender.try_send(message_for_channel) {
                         Ok(()) => {
                             release_value(heap, message)?;
@@ -814,20 +857,46 @@ impl OpCode {
                 push_value(execution, heap, Value::Reference(address))
             }
             OpCode::SetStrategy(strategy) => {
-                let sup_ref = pop_value(execution, heap)?;
+                // The supervisor reference passes straight through, so keep the
+                // count the stack already holds instead of dropping it to zero
+                // and taking it again.
+                let sup_ref = pop_raw_value(execution)?;
                 if let Value::Reference(addr) = sup_ref {
                     if let Some(HeapObject::Supervisor(vm, _, _)) = heap.get_mut(addr) {
                         vm.set_strategy(*strategy);
                     } else {
+                        release_value(heap, sup_ref)?;
                         return Err(VmError::InvalidReference);
                     }
+                    push_existing_value(execution, Value::Reference(addr));
+                    Ok(())
+                } else {
+                    Err(VmError::InvalidReference)
+                }
+            }
+            OpCode::SuperviseChild(child) => {
+                let sup_ref = pop_value(execution, heap)?;
+                if let Value::Reference(addr) = sup_ref {
+                    // Resolving the start ip also validates that `child` names
+                    // an actor rather than an arbitrary heap address.
+                    let start_ip = actor_start_ip(heap, *child)?;
+                    match heap.get_mut(addr) {
+                        Some(HeapObject::Supervisor(supervisor, _, _)) => {
+                            supervisor.supervise_child(ChildSpec {
+                                reference: *child,
+                                start_ip,
+                            });
+                        }
+                        _ => return Err(VmError::InvalidReference),
+                    }
+                    log::info!("Placed actor {} under supervisor {}", child, addr);
                     push_value(execution, heap, Value::Reference(addr))
                 } else {
                     Err(VmError::InvalidReference)
                 }
             }
             OpCode::RestartChild(child) => {
-                let sup_ref = pop_value(execution, heap)?;
+                let sup_ref = pop_raw_value(execution)?;
                 if let Value::Reference(addr) = sup_ref {
                     let start_ip = actor_start_ip(heap, *child)?;
                     let targets = if let Some(HeapObject::Supervisor(vm, _, _)) = heap.get_mut(addr)
@@ -837,6 +906,7 @@ impl OpCode {
                             start_ip,
                         })
                     } else {
+                        release_value(heap, sup_ref)?;
                         return Err(VmError::InvalidReference);
                     };
 
@@ -844,7 +914,8 @@ impl OpCode {
                         restart_actor(heap, target)?;
                     }
 
-                    push_value(execution, heap, Value::Reference(addr))
+                    push_existing_value(execution, Value::Reference(addr));
+                    Ok(())
                 } else {
                     Err(VmError::InvalidReference)
                 }

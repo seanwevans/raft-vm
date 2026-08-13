@@ -92,6 +92,10 @@ Pop
 true 3.14
 ```
 
+Numbers may be negative: `-5` and `-3.14` are literals. Because Raft is postfix,
+subtraction always follows its two operands (`5 3 -`) and is never written flush
+against a number, so there is no ambiguity between the two.
+
 The compiler now uses a lexer/parser pipeline that supports integers, floats,
 booleans (`true`/`false`), string literals with spaces (for example,
 `"hello raft vm"`), `#` and `//` comments, textual labels such as `.loop`,
@@ -138,7 +142,25 @@ Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Modules/Globals**: `LoadGlobal`, `GetExport`, `CallNative`
 - **Control Flow**: `Jump`, `JumpIfFalse`, `Call`, `CallNative`, `Return`
 - **Actor Management**: `SpawnActor`, `SendMessage`, `ReceiveMessage`
-- **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
+- **Supervision**: `SpawnSupervisor`, `SetStrategy`, `SuperviseChild`,
+                   `RestartChild`
+
+A supervisor acts on the children registered with it. `SuperviseChild <address>`
+places an already-spawned actor under the supervisor on top of the stack and
+leaves the supervisor there so registrations can be chained:
+
+```
+SpawnSupervisor .workers
+SetStrategy 1
+SuperviseChild 2
+SuperviseChild 3
+```
+
+`SetStrategy` selects what happens when `RestartChild` fires: `0` restarts only
+the failed child (one-for-one), `1` restarts every registered child
+(one-for-all), and `2` restarts the failed child and those registered after it
+(rest-for-one). The last two act on the registered child list, so a child that
+was never registered is never restarted alongside its siblings.
 
 ---
 
@@ -178,6 +200,33 @@ cargo llvm-cov --workspace --summary-only   # per-file summary
 cargo llvm-cov --workspace --html           # browsable report
 cargo llvm-cov --workspace --show-missing-lines
 ```
+
+## Benchmarks
+Raft uses [Criterion](https://github.com/bheisler/criterion.rs) for
+statistics-driven benchmarking. Run everything, or one target at a time:
+
+```bash
+cargo bench                      # all benchmarks
+cargo bench --bench interpreter  # opcode dispatch, control flow, messaging
+cargo bench --bench heap         # allocation, collection, message conversion
+cargo bench --bench compiler     # lexing, parsing, emission, label resolution
+```
+
+Filter to a single measurement by name, and shorten the sampling window while
+iterating:
+
+```bash
+cargo bench --bench heap -- collect_garbage --measurement-time 2
+```
+
+Criterion compares each run against the previous one stored in
+`target/criterion`, reporting the change and whether it is statistically
+significant. To check only that the benchmarks still build, use
+`cargo bench --no-run`.
+
+Benchmarks that allocate take a fresh `Heap` per iteration. Sharing one lets an
+allocating program grow it without bound across the measurement, which measures
+heap growth rather than the operation under test.
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request.
