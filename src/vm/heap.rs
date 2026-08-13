@@ -19,6 +19,7 @@ pub const MAX_MESSAGE_DEPTH: usize = 512;
 pub struct Heap {
     objects: Vec<Option<HeapObject>>,
     free_list: Vec<usize>,
+    allocations_since_collection: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -213,10 +214,12 @@ impl Heap {
         Self {
             objects: Vec::new(),
             free_list: Vec::new(),
+            allocations_since_collection: 0,
         }
     }
 
     pub fn allocate(&mut self, object: HeapObject) -> usize {
+        self.allocations_since_collection += 1;
         if let Some(address) = self.free_list.pop() {
             self.objects[address] = Some(object);
             log::info!("Allocated object in reused heap slot {}", address);
@@ -227,6 +230,22 @@ impl Heap {
             log::info!("Allocated object at new heap slot {}", address);
             address
         }
+    }
+
+    /// Number of allocations made since the last collection. Drives the VM's
+    /// decision about when to collect.
+    pub fn allocations_since_collection(&self) -> usize {
+        self.allocations_since_collection
+    }
+
+    /// Number of heap slots currently holding an object.
+    pub fn live_object_count(&self) -> usize {
+        self.objects.iter().filter(|slot| slot.is_some()).count()
+    }
+
+    /// Total number of heap slots, including free slots awaiting reuse.
+    pub fn slot_count(&self) -> usize {
+        self.objects.len()
     }
 
     pub fn get(&self, address: usize) -> Option<&HeapObject> {
@@ -244,6 +263,7 @@ impl Heap {
 
     #[allow(clippy::needless_range_loop)]
     pub fn collect_garbage(&mut self) {
+        self.allocations_since_collection = 0;
         let object_count = self.objects.len();
         let mut internal_incoming = vec![0usize; object_count];
 

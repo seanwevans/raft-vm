@@ -15,6 +15,13 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
 const REDUCTION_QUOTA: usize = 2_000;
 
+/// Allocations a process may make before its heap is collected.
+///
+/// `Heap::release_reference` only lowers reference counts; slots are reclaimed
+/// by `Heap::collect_garbage`, so without a periodic collection a program's
+/// heap grows for as long as it runs.
+const GC_ALLOCATION_QUOTA: usize = 1_024;
+
 fn allocate_process_id() -> Result<usize, VmError> {
     NEXT_PROCESS_ID
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |process_id| {
@@ -95,6 +102,22 @@ impl VM {
         self.heap.collect_garbage();
     }
 
+    fn collect_garbage_if_needed(&mut self) {
+        if self.heap.allocations_since_collection() >= GC_ALLOCATION_QUOTA {
+            self.heap.collect_garbage();
+        }
+    }
+
+    /// Number of heap slots this process currently has allocated.
+    pub fn heap_live_object_count(&self) -> usize {
+        self.heap.live_object_count()
+    }
+
+    /// Total number of heap slots, including free slots awaiting reuse.
+    pub fn heap_slot_count(&self) -> usize {
+        self.heap.slot_count()
+    }
+
     pub fn global(&self, name: &str) -> Option<Value> {
         self.execution.globals().get(name).cloned()
     }
@@ -135,6 +158,11 @@ impl VM {
         }
 
         loop {
+            // Collect between instructions only, where every live object is
+            // reachable from the stack, locals or globals. Mid-opcode the heap
+            // can hold an object that is allocated but not yet rooted.
+            self.collect_garbage_if_needed();
+
             let state = self.execution.step_with_process(
                 &mut self.heap,
                 self.process_id,
