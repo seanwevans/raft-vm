@@ -312,12 +312,41 @@ impl VM {
         self.trap_exits
     }
 
-    pub fn reset_for_restart(&mut self, start_ip: usize) {
+    /// Reset this process to run again from `start_ip`, returning the sender for
+    /// its new mailbox.
+    ///
+    /// Restarting replaces the mailbox, so every previously handed out sender
+    /// now points at a closed channel. Callers must rewire anything holding an
+    /// old sender to the one returned here, or messages to the restarted
+    /// process are dropped.
+    #[must_use = "the restarted process has a new mailbox; senders must be rewired to it"]
+    pub fn reset_for_restart(&mut self, start_ip: usize) -> Sender<MessageValue> {
+        // The restarted process starts with an empty stack and no locals, so
+        // release what they held rather than stranding those objects. Globals
+        // hold the standard library and carry over with their counts intact.
+        let mut discarded: Vec<Value> = self.execution.stack.drain(..).collect();
+        discarded.extend(self.execution.locals.drain().map(|(_, value)| value));
+        for value in discarded {
+            if let Value::Reference(address) = value {
+                if let Err(error) = self.heap.release_reference(address) {
+                    log::warn!("Failed to release {} while restarting: {}", address, error);
+                }
+            }
+        }
+
+        let globals = std::mem::take(&mut self.execution.globals);
         let bytecode = self.execution.bytecode.clone();
         let debug_info = self.execution.debug_info.clone();
-        let (_tx, rx) = mpsc::channel(100);
+
+        let (tx, rx) = mpsc::channel(100);
         self.execution = ExecutionContext::with_mailbox_and_debug(bytecode, rx, debug_info);
+        self.execution.globals = globals;
         self.execution.ip = start_ip;
+
+        self.self_sender = tx.clone();
+        self.restart_ip = start_ip;
+        self.reductions = 0;
+        tx
     }
 
     pub fn mailbox_mut(&mut self) -> &mut Receiver<MessageValue> {
