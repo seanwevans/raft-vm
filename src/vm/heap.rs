@@ -193,6 +193,15 @@ impl ProcessHandle {
         self.supervisor_state.children()
     }
 
+    /// Place `child` under this supervisor, or update it if already tracked.
+    ///
+    /// Registration is what makes the `OneForAll` and `RestForOne` strategies
+    /// meaningful: they act on the supervisor's full child list, so a child
+    /// that was never registered can never be restarted alongside its siblings.
+    pub fn supervise_child(&mut self, child: ChildSpec) {
+        self.supervisor_state.ensure_child(child);
+    }
+
     pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
         self.supervisor_state.restart_targets(child)
     }

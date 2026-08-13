@@ -522,6 +522,7 @@ pub enum OpCode {
     // Supervisor
     SpawnSupervisor(usize),
     SetStrategy(usize),
+    SuperviseChild(usize),
     RestartChild(usize),
 }
 
@@ -821,6 +822,27 @@ impl OpCode {
                     } else {
                         return Err(VmError::InvalidReference);
                     }
+                    push_value(execution, heap, Value::Reference(addr))
+                } else {
+                    Err(VmError::InvalidReference)
+                }
+            }
+            OpCode::SuperviseChild(child) => {
+                let sup_ref = pop_value(execution, heap)?;
+                if let Value::Reference(addr) = sup_ref {
+                    // Resolving the start ip also validates that `child` names
+                    // an actor rather than an arbitrary heap address.
+                    let start_ip = actor_start_ip(heap, *child)?;
+                    match heap.get_mut(addr) {
+                        Some(HeapObject::Supervisor(supervisor, _, _)) => {
+                            supervisor.supervise_child(ChildSpec {
+                                reference: *child,
+                                start_ip,
+                            });
+                        }
+                        _ => return Err(VmError::InvalidReference),
+                    }
+                    log::info!("Placed actor {} under supervisor {}", child, addr);
                     push_value(execution, heap, Value::Reference(addr))
                 } else {
                     Err(VmError::InvalidReference)
