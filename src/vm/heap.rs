@@ -247,6 +247,14 @@ impl Heap {
             let Some(object) = self.objects[address].as_ref() else {
                 continue;
             };
+            // Only count edges from objects that are themselves still
+            // referenced. A dead object awaiting collection still holds its
+            // children in place, and counting those edges would cancel out the
+            // child's own count -- making a value that a stack slot still holds
+            // look unrooted and collecting it out from under the program.
+            if !object.is_alive() {
+                continue;
+            }
             for child in object.references() {
                 if child < object_count && self.objects[child].is_some() {
                     internal_incoming[child] += 1;
@@ -394,6 +402,11 @@ impl Heap {
         }
     }
 
+    /// Materialize a received message onto this heap.
+    ///
+    /// Every allocated object comes back with a count of 1, which covers the
+    /// reference its parent holds. The outermost object's count covers the
+    /// caller, so callers push the result without retaining it again.
     pub fn message_to_value(&mut self, message: MessageValue) -> Result<Value, VmError> {
         match message {
             MessageValue::Integer(v) => Ok(Value::Integer(v)),
