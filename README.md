@@ -178,6 +178,29 @@ Build the project in release mode:
 cargo build --release
 ```
 
+CI runs the same checks on every pull request. To reproduce them locally:
+
+```bash
+cargo test --all
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+```
+
+### Coverage
+Coverage is measured with
+[cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov). CI fails if line
+coverage drops below the floor set in `.github/workflows/ci.yml`, and attaches
+an `lcov.info` artifact to each run.
+
+```bash
+cargo install cargo-llvm-cov
+rustup component add llvm-tools-preview
+
+cargo llvm-cov --workspace --summary-only   # per-file summary
+cargo llvm-cov --workspace --html           # browsable report
+cargo llvm-cov --workspace --show-missing-lines
+```
+
 ## Benchmarks
 Raft uses [Criterion](https://github.com/bheisler/criterion.rs) for
 statistics-driven benchmarking. Run everything, or one target at a time:

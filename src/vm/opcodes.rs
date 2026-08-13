@@ -214,6 +214,10 @@ fn make_array(
     }
     elements.reverse();
 
+    for value in &elements {
+        retain_value(heap, value)?;
+    }
+
     let address = heap.allocate(HeapObject::Array(elements, 0));
     push_value(execution, heap, Value::Reference(address))
 }
@@ -1065,20 +1069,28 @@ mod heap_opcode_tests {
             other => panic!("expected child string reference on stack, got {other:?}"),
         };
 
-        OpCode::MakeArray(1).execute(&mut execution, &mut heap).unwrap();
+        OpCode::MakeArray(1)
+            .execute(&mut execution, &mut heap)
+            .unwrap();
         let parent_address = match execution.stack.last().cloned() {
             Some(Value::Reference(address)) => address,
             other => panic!("expected parent array reference on stack, got {other:?}"),
         };
 
-        OpCode::StoreVar(0).execute(&mut execution, &mut heap).unwrap();
+        OpCode::StoreVar(0)
+            .execute(&mut execution, &mut heap)
+            .unwrap();
 
         match heap.get(parent_address) {
-            Some(HeapObject::Array(_, rc)) => assert_eq!(*rc, 1, "stored parent should be retained"),
+            Some(HeapObject::Array(_, rc)) => {
+                assert_eq!(*rc, 1, "stored parent should be retained")
+            }
             other => panic!("expected stored parent array in heap, got {other:?}"),
         }
         match heap.get(child_address) {
-            Some(HeapObject::String(_, rc)) => assert_eq!(*rc, 1, "child should remain retained by parent"),
+            Some(HeapObject::String(_, rc)) => {
+                assert_eq!(*rc, 1, "child should remain retained by parent")
+            }
             other => panic!("expected child string in heap, got {other:?}"),
         }
     }
