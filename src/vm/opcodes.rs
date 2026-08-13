@@ -762,7 +762,17 @@ impl OpCode {
                     if let Value::Reference(message_address) = message {
                         increment_reference(heap, message_address)?;
                     }
-                    let message_for_channel = heap.value_to_message(message.clone())?;
+                    let message_for_channel = match heap.value_to_message(message.clone()) {
+                        Ok(message_for_channel) => message_for_channel,
+                        // A value the mailbox cannot represent (cyclic, too
+                        // deeply nested, or an unsendable handle) fails the
+                        // send without stranding the reference retained above.
+                        Err(error) => {
+                            push_existing_value(execution, Value::Reference(address));
+                            release_value(heap, message)?;
+                            return Err(error);
+                        }
+                    };
                     match sender.try_send(message_for_channel) {
                         Ok(()) => {
                             release_value(heap, message)?;
