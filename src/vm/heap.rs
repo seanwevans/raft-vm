@@ -54,7 +54,7 @@ pub struct ProcessHandle {
     parent: Option<usize>,
     start_ip: usize,
     current_ip: usize,
-    bytecode: Vec<OpCode>,
+    bytecode: Arc<[OpCode]>,
     debug_info: Option<DebugInfo>,
     links: Vec<Sender<MessageValue>>,
     trap_exits: bool,
@@ -83,7 +83,7 @@ impl ProcessHandle {
         process_id: usize,
         parent: Option<usize>,
         start_ip: usize,
-        bytecode: Vec<OpCode>,
+        bytecode: impl Into<Arc<[OpCode]>>,
         debug_info: Option<DebugInfo>,
         links: Vec<Sender<MessageValue>>,
         trap_exits: bool,
@@ -95,7 +95,7 @@ impl ProcessHandle {
             parent,
             start_ip,
             current_ip: start_ip,
-            bytecode,
+            bytecode: bytecode.into(),
             debug_info,
             links,
             trap_exits,
@@ -125,8 +125,9 @@ impl ProcessHandle {
         self.current_ip = ip;
     }
 
-    pub fn bytecode(&self) -> Vec<OpCode> {
-        self.bytecode.clone()
+    /// Share this process's instructions without copying them.
+    pub fn bytecode(&self) -> Arc<[OpCode]> {
+        Arc::clone(&self.bytecode)
     }
 
     pub fn debug_info(&self) -> Option<DebugInfo> {

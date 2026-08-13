@@ -104,7 +104,7 @@ fn run_process(
 }
 
 fn spawn_child_vm(
-    bytecode: Vec<OpCode>,
+    bytecode: Arc<[OpCode]>,
     debug_info: Option<crate::compiler::DebugInfo>,
     start_ip: usize,
     parent: Option<&ProcessContext>,
@@ -496,15 +496,20 @@ fn call_native(
     push_value(execution, heap, result)
 }
 
+/// An immutable program, shared rather than copied.
+///
+/// One `Arc` around the whole program, not one per instruction: a program is
+/// never modified once compiled, so sharing it costs a single refcount whoever
+/// holds it, and spawning a process no longer copies the instructions.
 #[derive(Debug, Clone)]
 pub struct Bytecode {
-    opcodes: Vec<Arc<OpCode>>,
+    opcodes: Arc<[OpCode]>,
 }
 
 impl Bytecode {
     pub fn new(opcodes: Vec<OpCode>) -> Self {
         Self {
-            opcodes: opcodes.into_iter().map(Arc::new).collect(),
+            opcodes: opcodes.into(),
         }
     }
 
@@ -516,24 +521,36 @@ impl Bytecode {
         self.opcodes.is_empty()
     }
 
-    pub fn decode(&self, ip: usize) -> Result<Arc<OpCode>, VmError> {
-        self.opcodes
-            .get(ip)
-            .cloned()
-            .ok_or(VmError::ExecutionOutOfBounds)
+    /// Share the instructions without copying them.
+    ///
+    /// Callers that execute many instructions should take this once and index
+    /// into it, rather than paying a refcount per instruction.
+    pub fn program(&self) -> Arc<[OpCode]> {
+        Arc::clone(&self.opcodes)
+    }
+
+    pub fn instructions(&self) -> &[OpCode] {
+        &self.opcodes
+    }
+
+    pub fn decode(&self, ip: usize) -> Result<&OpCode, VmError> {
+        self.opcodes.get(ip).ok_or(VmError::ExecutionOutOfBounds)
     }
 
     pub fn opcodes(&self) -> Vec<OpCode> {
-        self.opcodes
-            .iter()
-            .map(|opcode| opcode.as_ref().clone())
-            .collect()
+        self.opcodes.to_vec()
     }
 }
 
 impl From<Vec<OpCode>> for Bytecode {
     fn from(value: Vec<OpCode>) -> Self {
         Bytecode::new(value)
+    }
+}
+
+impl From<Arc<[OpCode]>> for Bytecode {
+    fn from(opcodes: Arc<[OpCode]>) -> Self {
+        Self { opcodes }
     }
 }
 
@@ -617,7 +634,7 @@ impl OpCode {
         &self,
         execution: &mut ExecutionContext,
         heap: &mut Heap,
-        process: Option<ProcessContext>,
+        process: Option<&ProcessContext>,
     ) -> Result<ExecutionState, VmError> {
         let result: Result<(), VmError> = match self {
             OpCode::Add => binary_op(execution, heap, |a, b| a.checked_add(b)),
@@ -844,10 +861,10 @@ impl OpCode {
                     return Err(VmError::ExecutionOutOfBounds);
                 }
                 let (handle, tx) = spawn_child_vm(
-                    execution.bytecode.opcodes(),
+                    execution.bytecode.program(),
                     execution.debug_info.clone(),
                     *addr,
-                    process.as_ref(),
+                    process,
                     false,
                     Vec::new(),
                 )?;
@@ -918,10 +935,10 @@ impl OpCode {
                     return Err(VmError::ExecutionOutOfBounds);
                 }
                 let (handle, tx) = spawn_child_vm(
-                    execution.bytecode.opcodes(),
+                    execution.bytecode.program(),
                     execution.debug_info.clone(),
                     *addr,
-                    process.as_ref(),
+                    process,
                     true,
                     Vec::new(),
                 )?;

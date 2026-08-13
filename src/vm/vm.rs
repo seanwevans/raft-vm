@@ -3,7 +3,7 @@
 use crate::compiler::DebugInfo;
 use crate::stdlib;
 use crate::vm::error::VmError;
-use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState};
+use crate::vm::execution::{BlockingOperation, ExecutionContext, ExecutionState, ProcessContext};
 use crate::vm::heap::{Heap, HeapObject};
 use crate::vm::opcodes::{Bytecode, OpCode};
 use crate::vm::supervision::{ExitReason, ExitSignal};
@@ -157,18 +157,21 @@ impl VM {
             return Err(error);
         }
 
-        loop {
-            // Collect between instructions only, where every live object is
-            // reachable from the stack, locals or globals. Mid-opcode the heap
-            // can hold an object that is allocated but not yet rooted.
-            self.collect_garbage_if_needed();
+        // Both of these are loop-invariant: the program cannot change while a
+        // process runs, and the context describes the process, not the
+        // instruction. Rebuilding them per instruction cost a refcount on the
+        // program and a channel-sender clone on every single dispatch.
+        let program = self.execution.bytecode.program();
+        let process = ProcessContext {
+            process_id: self.process_id,
+            self_sender: self.self_sender.clone(),
+            trap_exits: self.trap_exits,
+        };
 
-            let state = self.execution.step_with_process(
-                &mut self.heap,
-                self.process_id,
-                self.self_sender.clone(),
-                self.trap_exits,
-            );
+        loop {
+            let state = self
+                .execution
+                .step_program(&program, &mut self.heap, Some(&process));
 
             match state {
                 Ok(ExecutionState::Continue) => {
@@ -353,8 +356,9 @@ impl VM {
         self.execution.mailbox_mut()
     }
 
-    pub fn bytecode(&self) -> Vec<OpCode> {
-        self.execution.bytecode.opcodes()
+    /// Share this process's instructions without copying them.
+    pub fn bytecode(&self) -> std::sync::Arc<[OpCode]> {
+        self.execution.bytecode.program()
     }
 
     pub fn debug_info(&self) -> Option<DebugInfo> {

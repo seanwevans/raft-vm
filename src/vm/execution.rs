@@ -88,7 +88,8 @@ impl ExecutionContext {
     }
 
     pub fn step(&mut self, heap: &mut Heap) -> Result<ExecutionState, VmError> {
-        self.step_inner(heap, None)
+        let program = self.bytecode.program();
+        self.step_program(&program, heap, None)
     }
 
     pub fn step_with_process(
@@ -98,34 +99,39 @@ impl ExecutionContext {
         self_sender: Sender<MessageValue>,
         trap_exits: bool,
     ) -> Result<ExecutionState, VmError> {
-        self.step_inner(
-            heap,
-            Some(ProcessContext {
-                process_id,
-                self_sender,
-                trap_exits,
-            }),
-        )
+        let program = self.bytecode.program();
+        let process = ProcessContext {
+            process_id,
+            self_sender,
+            trap_exits,
+        };
+        self.step_program(&program, heap, Some(&process))
     }
 
-    fn step_inner(
+    /// Execute one instruction from an already-shared program.
+    ///
+    /// Callers running many instructions take the program once with
+    /// [`Bytecode::program`] and pass it in, rather than paying a refcount and
+    /// rebuilding the process context on every instruction. The program is
+    /// immutable while a process runs, so holding it across the loop is safe.
+    pub fn step_program(
         &mut self,
+        program: &[OpCode],
         heap: &mut Heap,
-        process: Option<ProcessContext>,
+        process: Option<&ProcessContext>,
     ) -> Result<ExecutionState, VmError> {
-        if self.ip == self.bytecode.len() {
+        if self.ip == program.len() {
             return Ok(ExecutionState::Halted);
         }
-        if self.ip > self.bytecode.len() {
+        let Some(opcode) = program.get(self.ip) else {
             log::error!("Instruction pointer out of bounds: {}", self.ip);
             return Err(VmError::ExecutionOutOfBounds);
-        }
+        };
 
         let instruction_ip = self.ip;
-        let opcode = self.bytecode.decode(self.ip)?;
         // advance instruction pointer unless opcode modified it
         self.ip += 1;
-        log::info!("Executing opcode: {:?}", opcode);
+        log::debug!("Executing opcode: {:?}", opcode);
         opcode
             .execute_with_process(self, heap, process)
             .map_err(|error| self.with_debug_location(error, instruction_ip))

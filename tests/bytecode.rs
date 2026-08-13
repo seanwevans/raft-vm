@@ -31,7 +31,7 @@ fn array_and_string_adjacent_opcodes_round_trip() {
     assert!(matches!(*bytecode.decode(0).unwrap(), OpCode::ArrayGet));
     assert!(matches!(*bytecode.decode(1).unwrap(), OpCode::ArraySet));
     assert!(matches!(
-        bytecode.decode(2).unwrap().as_ref(),
+        bytecode.decode(2).unwrap(),
         OpCode::MakeString(value) if value == "hello"
     ));
 }
