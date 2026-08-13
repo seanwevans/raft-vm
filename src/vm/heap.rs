@@ -11,10 +11,15 @@ use crate::compiler::DebugInfo;
 use crate::vm::opcodes::OpCode;
 use crate::vm::supervision::{ChildSpec, SupervisorState, SupervisorStrategy};
 
+/// Deepest chain of heap references `value_to_message` will follow before it
+/// gives up. Bounded so a pathological value cannot exhaust the host stack.
+pub const MAX_MESSAGE_DEPTH: usize = 512;
+
 #[derive(Debug)]
 pub struct Heap {
     objects: Vec<Option<HeapObject>>,
     free_list: Vec<usize>,
+    allocations_since_collection: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +199,15 @@ impl ProcessHandle {
         self.supervisor_state.children()
     }
 
+    /// Place `child` under this supervisor, or update it if already tracked.
+    ///
+    /// Registration is what makes the `OneForAll` and `RestForOne` strategies
+    /// meaningful: they act on the supervisor's full child list, so a child
+    /// that was never registered can never be restarted alongside its siblings.
+    pub fn supervise_child(&mut self, child: ChildSpec) {
+        self.supervisor_state.ensure_child(child);
+    }
+
     pub fn restart_targets(&mut self, child: ChildSpec) -> Vec<ChildSpec> {
         self.supervisor_state.restart_targets(child)
     }
@@ -210,10 +224,12 @@ impl Heap {
         Self {
             objects: Vec::new(),
             free_list: Vec::new(),
+            allocations_since_collection: 0,
         }
     }
 
     pub fn allocate(&mut self, object: HeapObject) -> usize {
+        self.allocations_since_collection += 1;
         if let Some(address) = self.free_list.pop() {
             self.objects[address] = Some(object);
             log::info!("Allocated object in reused heap slot {}", address);
@@ -224,6 +240,22 @@ impl Heap {
             log::info!("Allocated object at new heap slot {}", address);
             address
         }
+    }
+
+    /// Number of allocations made since the last collection. Drives the VM's
+    /// decision about when to collect.
+    pub fn allocations_since_collection(&self) -> usize {
+        self.allocations_since_collection
+    }
+
+    /// Number of heap slots currently holding an object.
+    pub fn live_object_count(&self) -> usize {
+        self.objects.iter().filter(|slot| slot.is_some()).count()
+    }
+
+    /// Total number of heap slots, including free slots awaiting reuse.
+    pub fn slot_count(&self) -> usize {
+        self.objects.len()
     }
 
     pub fn get(&self, address: usize) -> Option<&HeapObject> {
@@ -241,6 +273,7 @@ impl Heap {
 
     #[allow(clippy::needless_range_loop)]
     pub fn collect_garbage(&mut self) {
+        self.allocations_since_collection = 0;
         let object_count = self.objects.len();
         let mut internal_incoming = vec![0usize; object_count];
 
@@ -248,6 +281,14 @@ impl Heap {
             let Some(object) = self.objects[address].as_ref() else {
                 continue;
             };
+            // Only count edges from objects that are themselves still
+            // referenced. A dead object awaiting collection still holds its
+            // children in place, and counting those edges would cancel out the
+            // child's own count -- making a value that a stack slot still holds
+            // look unrooted and collecting it out from under the program.
+            if !object.is_alive() {
+                continue;
+            }
             for child in object.references() {
                 if child < object_count && self.objects[child].is_some() {
                     internal_incoming[child] += 1;
@@ -320,23 +361,32 @@ impl Heap {
         }
     }
 
+    /// Drop one reference to `address`, cascading into children whose last
+    /// reference this was.
+    ///
+    /// Traversal is iterative: nesting depth is chosen by the running program,
+    /// so recursing here would let a deeply nested value overflow the host
+    /// stack. Cycles terminate on their own because an object's children are
+    /// only followed while its count is still 1, and the count reaches 0 before
+    /// the cycle closes.
     pub fn release_reference(&mut self, address: usize) -> Result<(), VmError> {
-        let child_references = match self.get_mut(address) {
-            Some(object) => {
-                let refs = if object.ref_count() == 1 {
-                    object.references()
-                } else {
-                    Vec::new()
-                };
-                object.decrement_ref();
-                refs
-            }
-            None => return Err(VmError::InvalidReference),
-        };
+        let mut pending = vec![address];
 
-        for child in child_references {
-            self.release_reference(child)?;
+        while let Some(address) = pending.pop() {
+            match self.get_mut(address) {
+                Some(object) => {
+                    if object.ref_count() == 1 {
+                        let children = object.references();
+                        object.decrement_ref();
+                        pending.extend(children);
+                    } else {
+                        object.decrement_ref();
+                    }
+                }
+                None => return Err(VmError::InvalidReference),
+            }
         }
+
         Ok(())
     }
 
@@ -362,29 +412,68 @@ impl Heap {
     }
 
     pub fn value_to_message(&self, value: Value) -> Result<MessageValue, VmError> {
+        let mut visiting = Vec::new();
+        self.value_to_message_at(value, &mut visiting)
+    }
+
+    fn value_to_message_at(
+        &self,
+        value: Value,
+        visiting: &mut Vec<usize>,
+    ) -> Result<MessageValue, VmError> {
         match value {
             Value::Integer(v) => Ok(MessageValue::Integer(v)),
             Value::Float(v) => Ok(MessageValue::Float(v)),
             Value::Boolean(v) => Ok(MessageValue::Boolean(v)),
             Value::ExitSignal(v) => Ok(MessageValue::ExitSignal(v)),
             Value::Null => Ok(MessageValue::Null),
-            Value::Reference(address) => self.reference_to_message(address),
+            Value::Reference(address) => self.reference_to_message(address, visiting),
         }
     }
 
-    fn reference_to_message(&self, address: usize) -> Result<MessageValue, VmError> {
+    /// Convert a heap reference into a message, refusing values that cannot be
+    /// represented as the tree-shaped `MessageValue`.
+    ///
+    /// `visiting` holds the addresses on the current traversal path. A repeat
+    /// visit means the value is cyclic, and an over-long path means the value
+    /// nests deeper than the host stack can safely handle. Both are reported as
+    /// ordinary `VmError`s so a misbehaving program fails its own process
+    /// instead of overflowing the stack and aborting the whole runtime.
+    fn reference_to_message(
+        &self,
+        address: usize,
+        visiting: &mut Vec<usize>,
+    ) -> Result<MessageValue, VmError> {
+        if visiting.contains(&address) {
+            return Err(VmError::CyclicReference(address));
+        }
+        if visiting.len() >= MAX_MESSAGE_DEPTH {
+            return Err(VmError::MessageTooDeep(MAX_MESSAGE_DEPTH));
+        }
+
+        visiting.push(address);
+        let message = self.reference_to_message_unchecked(address, visiting);
+        visiting.pop();
+        message
+    }
+
+    fn reference_to_message_unchecked(
+        &self,
+        address: usize,
+        visiting: &mut Vec<usize>,
+    ) -> Result<MessageValue, VmError> {
         match self.get(address).ok_or(VmError::InvalidReference)? {
             HeapObject::Array(values, _) => Ok(MessageValue::Array(
                 values
                     .iter()
-                    .map(|value| self.value_to_message(value.clone()))
+                    .map(|value| self.value_to_message_at(value.clone(), visiting))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             HeapObject::String(value, _) => Ok(MessageValue::String(value.clone())),
             HeapObject::Module { exports, .. } => Ok(MessageValue::Module(
                 exports
                     .iter()
-                    .map(|(k, v)| Ok((k.clone(), self.value_to_message(v.clone())?)))
+                    .map(|(k, v)| Ok((k.clone(), self.value_to_message_at(v.clone(), visiting)?)))
                     .collect::<Result<HashMap<_, _>, VmError>>()?,
             )),
             HeapObject::NativeFunction(_, _)
@@ -395,6 +484,11 @@ impl Heap {
         }
     }
 
+    /// Materialize a received message onto this heap.
+    ///
+    /// Every allocated object comes back with a count of 1, which covers the
+    /// reference its parent holds. The outermost object's count covers the
+    /// caller, so callers push the result without retaining it again.
     pub fn message_to_value(&mut self, message: MessageValue) -> Result<Value, VmError> {
         match message {
             MessageValue::Integer(v) => Ok(Value::Integer(v)),

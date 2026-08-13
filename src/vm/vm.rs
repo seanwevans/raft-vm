@@ -15,6 +15,13 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 static NEXT_PROCESS_ID: AtomicUsize = AtomicUsize::new(1);
 const REDUCTION_QUOTA: usize = 2_000;
 
+/// Allocations a process may make before its heap is collected.
+///
+/// `Heap::release_reference` only lowers reference counts; slots are reclaimed
+/// by `Heap::collect_garbage`, so without a periodic collection a program's
+/// heap grows for as long as it runs.
+const GC_ALLOCATION_QUOTA: usize = 1_024;
+
 fn allocate_process_id() -> Result<usize, VmError> {
     NEXT_PROCESS_ID
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |process_id| {
@@ -93,6 +100,22 @@ impl VM {
 
     pub fn collect_garbage(&mut self) {
         self.heap.collect_garbage();
+    }
+
+    fn collect_garbage_if_needed(&mut self) {
+        if self.heap.allocations_since_collection() >= GC_ALLOCATION_QUOTA {
+            self.heap.collect_garbage();
+        }
+    }
+
+    /// Number of heap slots this process currently has allocated.
+    pub fn heap_live_object_count(&self) -> usize {
+        self.heap.live_object_count()
+    }
+
+    /// Total number of heap slots, including free slots awaiting reuse.
+    pub fn heap_slot_count(&self) -> usize {
+        self.heap.slot_count()
     }
 
     pub fn global(&self, name: &str) -> Option<Value> {
@@ -191,8 +214,10 @@ impl VM {
                     .recv()
                     .await
                     .ok_or(VmError::MailboxDisconnected)?;
+                // Already counted for this stack slot by `message_to_value`.
                 let value = self.heap.message_to_value(message)?;
-                self.push_runtime_value(value)
+                self.execution.stack.push(value);
+                Ok(())
             }
             BlockingOperation::SendMessage {
                 sender,
@@ -290,12 +315,41 @@ impl VM {
         self.trap_exits
     }
 
-    pub fn reset_for_restart(&mut self, start_ip: usize) {
+    /// Reset this process to run again from `start_ip`, returning the sender for
+    /// its new mailbox.
+    ///
+    /// Restarting replaces the mailbox, so every previously handed out sender
+    /// now points at a closed channel. Callers must rewire anything holding an
+    /// old sender to the one returned here, or messages to the restarted
+    /// process are dropped.
+    #[must_use = "the restarted process has a new mailbox; senders must be rewired to it"]
+    pub fn reset_for_restart(&mut self, start_ip: usize) -> Sender<MessageValue> {
+        // The restarted process starts with an empty stack and no locals, so
+        // release what they held rather than stranding those objects. Globals
+        // hold the standard library and carry over with their counts intact.
+        let mut discarded: Vec<Value> = self.execution.stack.drain(..).collect();
+        discarded.extend(self.execution.locals.drain().map(|(_, value)| value));
+        for value in discarded {
+            if let Value::Reference(address) = value {
+                if let Err(error) = self.heap.release_reference(address) {
+                    log::warn!("Failed to release {} while restarting: {}", address, error);
+                }
+            }
+        }
+
+        let globals = std::mem::take(&mut self.execution.globals);
         let bytecode = self.execution.bytecode.clone();
         let debug_info = self.execution.debug_info.clone();
-        let (_tx, rx) = mpsc::channel(100);
+
+        let (tx, rx) = mpsc::channel(100);
         self.execution = ExecutionContext::with_mailbox_and_debug(bytecode, rx, debug_info);
+        self.execution.globals = globals;
         self.execution.ip = start_ip;
+
+        self.self_sender = tx.clone();
+        self.restart_ip = start_ip;
+        self.reductions = 0;
+        tx
     }
 
     pub fn mailbox_mut(&mut self) -> &mut Receiver<MessageValue> {

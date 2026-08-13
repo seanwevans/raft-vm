@@ -111,9 +111,21 @@ async fn receive_message_updates_reference_counts() {
         .get(message_addr)
         .expect("message object should be allocated")
     {
-        HeapObject::Array(_, rc) => assert_eq!(*rc, 2, "message should be retained on stack"),
+        // One count for the stack slot holding it, and no more: the message was
+        // allocated for this stack slot, so `ReceiveMessage` does not retain it
+        // a second time. At 2 the message could never be collected after the
+        // program popped it.
+        HeapObject::Array(_, rc) => assert_eq!(*rc, 1, "message should be retained once, by the stack"),
         other => panic!("expected array at message_addr, got {other:?}"),
     }
+
+    // Dropping the stack reference must make the message collectable.
+    OpCode::Pop.execute(&mut execution, &mut heap).unwrap();
+    heap.collect_garbage();
+    assert!(
+        heap.get(message_addr).is_none(),
+        "a received message must be reclaimable once the program drops it"
+    );
 }
 
 #[tokio::test]
@@ -175,7 +187,9 @@ async fn send_message_full_releases_reference_message_before_yield() {
         .execute(&mut execution, &mut heap)
         .unwrap();
 
-    let state = OpCode::SendMessage.execute(&mut execution, &mut heap).unwrap();
+    let state = OpCode::SendMessage
+        .execute(&mut execution, &mut heap)
+        .unwrap();
     assert!(
         matches!(state, raft::vm::execution::ExecutionState::Yield(_)),
         "expected SendMessage to yield when channel is full"
