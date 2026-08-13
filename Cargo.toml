@@ -14,6 +14,21 @@ log = "0.4"
 env_logger = "0.10"
 clap = { version = "4.4", features = ["derive"] }  # command-line parsing
 
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "interpreter"
+harness = false
+
+[[bench]]
+name = "heap"
+harness = false
+
+[[bench]]
+name = "compiler"
+harness = false
+
 [profile.dev]
 debug = true
 
