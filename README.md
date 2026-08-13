@@ -138,7 +138,25 @@ Raft uses a custom bytecode instruction set that mirrors fundamental operations:
 - **Modules/Globals**: `LoadGlobal`, `GetExport`, `CallNative`
 - **Control Flow**: `Jump`, `JumpIfFalse`, `Call`, `CallNative`, `Return`
 - **Actor Management**: `SpawnActor`, `SendMessage`, `ReceiveMessage`
-- **Supervision**: `SpawnSupervisor`, `SetStrategy`, `RestartChild`
+- **Supervision**: `SpawnSupervisor`, `SetStrategy`, `SuperviseChild`,
+                   `RestartChild`
+
+A supervisor acts on the children registered with it. `SuperviseChild <address>`
+places an already-spawned actor under the supervisor on top of the stack and
+leaves the supervisor there so registrations can be chained:
+
+```
+SpawnSupervisor .workers
+SetStrategy 1
+SuperviseChild 2
+SuperviseChild 3
+```
+
+`SetStrategy` selects what happens when `RestartChild` fires: `0` restarts only
+the failed child (one-for-one), `1` restarts every registered child
+(one-for-all), and `2` restarts the failed child and those registered after it
+(rest-for-one). The last two act on the registered child list, so a child that
+was never registered is never restarted alongside its siblings.
 
 ---
 

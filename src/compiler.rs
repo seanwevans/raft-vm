@@ -121,6 +121,7 @@ pub enum Instruction {
     ReceiveMessage,
     SpawnSupervisor(AddressOperand),
     SetStrategy(usize),
+    SuperviseChild(usize),
     RestartChild(usize),
 }
 
@@ -412,6 +413,9 @@ impl Parser {
                 Instruction::SpawnSupervisor(self.expect_address("SpawnSupervisor")?)
             }
             "SetStrategy" => Instruction::SetStrategy(self.expect_usize("SetStrategy")?),
+            "SuperviseChild" => {
+                Instruction::SuperviseChild(self.expect_usize("SuperviseChild")?)
+            }
             "RestartChild" => Instruction::RestartChild(self.expect_usize("RestartChild")?),
             _ => return Err(CompilerError::InvalidToken(identifier.to_string())),
         };
@@ -634,6 +638,7 @@ fn emit_instruction(
             OpCode::SpawnSupervisor(resolve_address(address, labels)?)
         }
         Instruction::SetStrategy(strategy) => OpCode::SetStrategy(strategy),
+        Instruction::SuperviseChild(child) => OpCode::SuperviseChild(child),
         Instruction::RestartChild(child) => OpCode::RestartChild(child),
     };
     push(bytecode, spans, opcode, span);
