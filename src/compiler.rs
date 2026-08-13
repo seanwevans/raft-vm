@@ -162,6 +162,13 @@ impl<'a> Lexer<'a> {
                 '#' => self.skip_line_comment(),
                 '/' if self.peek_next_char() == Some('/') => self.skip_line_comment(),
                 '"' => tokens.push(self.lex_string()?),
+                // `-` immediately followed by a digit starts a negative
+                // literal. Raft is postfix, so subtraction always follows its
+                // two operands and is never written flush against a number:
+                // `5 3 -` subtracts, `-3` is the literal.
+                '-' if self.peek_next_char().is_some_and(|ch| ch.is_ascii_digit()) => {
+                    tokens.push(self.lex_word()?)
+                }
                 '+' | '-' | '*' | '/' | '%' | '^' => tokens.push(self.lex_symbol()),
                 _ => tokens.push(self.lex_word()?),
             };
