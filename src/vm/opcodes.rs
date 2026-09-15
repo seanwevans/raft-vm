@@ -124,6 +124,7 @@ fn spawn_child_vm(
         if process.trap_exits {
             vm.set_trap_exits(true);
         }
+        vm.set_instruction_budget(process.instruction_budget);
     }
 
     let handle = {
