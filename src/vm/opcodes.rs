@@ -364,7 +364,7 @@ fn make_module(
     values.reverse();
 
     let mut exports = std::collections::HashMap::with_capacity(names.len());
-    for (name, value) in names.iter().cloned().zip(values.into_iter()) {
+    for (name, value) in names.iter().cloned().zip(values) {
         if let Some(replaced) = exports.insert(name, value) {
             // Duplicate export names in one MakeModule: only the last value is
             // reachable, so the shadowed one gives up its reference here.
