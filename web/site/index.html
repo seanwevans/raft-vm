@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Raft Playground</title>
+    <meta
+      name="description"
+      content="Write and run Raft bytecode in the browser. The same VM the CLI runs, compiled to WebAssembly."
+    />
+    <meta name="color-scheme" content="dark light" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23161a23'/%3E%3Cg fill='%2378c7b0'%3E%3Crect x='6' y='9' width='20' height='3.4' rx='1.7'/%3E%3Crect x='6' y='14.3' width='20' height='3.4' rx='1.7'/%3E%3Crect x='6' y='19.6' width='20' height='3.4' rx='1.7'/%3E%3C/g%3E%3Crect x='14.6' y='4' width='2.8' height='24' rx='1.4' fill='%23e5b567'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="mark" aria-hidden="true"></span>
+        <h1>Raft</h1>
+        <span class="version" id="version" title="VM version">loading…</span>
+      </div>
+
+      <div class="actions">
+        <label class="field">
+          <span class="field-label">Example</span>
+          <select id="examples" aria-label="Load an example program">
+            <option value="">Choose…</option>
+          </select>
+        </label>
+        <button type="button" id="share" class="ghost" title="Copy a link that reopens this program">
+          Copy link
+        </button>
+        <button type="button" id="run" class="primary">
+          Run <kbd>Ctrl</kbd><kbd>↵</kbd>
+        </button>
+        <a class="ghost repo" href="https://github.com/seanwevans/raft-vm">Source</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="pane" aria-labelledby="program-heading">
+        <div class="pane-head">
+          <h2 id="program-heading">Program</h2>
+          <span class="hint" id="caret">line 1</span>
+        </div>
+
+        <div class="editor" id="editor">
+          <div class="gutter" id="gutter" aria-hidden="true"></div>
+          <pre class="highlight" id="highlight" aria-hidden="true"><code></code></pre>
+          <textarea
+            id="source"
+            spellcheck="false"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            wrap="off"
+            aria-label="Raft program"
+          ></textarea>
+        </div>
+      </section>
+
+      <section class="pane" aria-labelledby="results-heading">
+        <h2 id="results-heading" class="visually-hidden">Results</h2>
+
+        <div class="tabs" role="tablist" aria-label="Results">
+          <button type="button" role="tab" id="tab-output" aria-controls="panel-output" aria-selected="true">
+            Output
+          </button>
+          <button type="button" role="tab" id="tab-stack" aria-controls="panel-stack" aria-selected="false" tabindex="-1">
+            Stack <span class="count" id="stack-count"></span>
+          </button>
+          <button type="button" role="tab" id="tab-bytecode" aria-controls="panel-bytecode" aria-selected="false" tabindex="-1">
+            Bytecode <span class="count" id="bytecode-count"></span>
+          </button>
+          <button type="button" role="tab" id="tab-reference" aria-controls="panel-reference" aria-selected="false" tabindex="-1">
+            Reference
+          </button>
+        </div>
+
+        <p class="banner" id="banner" hidden></p>
+
+        <div class="panels">
+          <div class="panel" role="tabpanel" id="panel-output" aria-labelledby="tab-output" tabindex="0">
+            <pre class="output" id="output"><span class="muted">Run a program to see what it prints.</span></pre>
+          </div>
+
+          <div class="panel" role="tabpanel" id="panel-stack" aria-labelledby="tab-stack" tabindex="0" hidden>
+            <ol class="stack" id="stack" start="0"></ol>
+            <p class="muted" id="stack-empty">The stack is empty.</p>
+          </div>
+
+          <div class="panel" role="tabpanel" id="panel-bytecode" aria-labelledby="tab-bytecode" tabindex="0" hidden>
+            <table class="bytecode">
+              <thead>
+                <tr><th scope="col">#</th><th scope="col">Instruction</th><th scope="col">Line</th></tr>
+              </thead>
+              <tbody id="bytecode"></tbody>
+            </table>
+            <p class="muted" id="bytecode-empty">Nothing compiled yet.</p>
+          </div>
+
+          <div class="panel reference" role="tabpanel" id="panel-reference" aria-labelledby="tab-reference" tabindex="0" hidden>
+            <h3>Writing Raft</h3>
+            <p>
+              Raft is postfix and stack-based: operands first, then the instruction that
+              consumes them. <code>5 3 -</code> pushes 5 and 3 and leaves 2.
+              <code>#</code> and <code>//</code> start a comment.
+              A name beginning with a dot is a label — <code>.loop</code> marks a spot,
+              and <code>Jump .loop</code> goes there.
+            </p>
+
+            <h3>Instruction set</h3>
+            <dl class="opcodes">
+              <dt>Literals</dt>
+              <dd><code>42</code> <code>-3.14</code> <code>true</code> <code>false</code> <code>"a string"</code></dd>
+
+              <dt>Arithmetic</dt>
+              <dd>
+                <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code> <code>^</code>
+                — or by name: <code>Add</code> <code>Sub</code> <code>Mul</code> <code>Div</code>
+                <code>Mod</code> <code>Exp</code> <code>Neg</code>
+              </dd>
+
+              <dt>Comparison</dt>
+              <dd>
+                <code>Eq</code> <code>Ne</code> <code>Lt</code> <code>Le</code> <code>Gt</code> <code>Ge</code>
+                — each leaves a boolean. Ordering needs two integers or two floats;
+                equality is defined for any pair.
+              </dd>
+
+              <dt>Logic</dt>
+              <dd><code>Not</code> <code>And</code> <code>Or</code> — operands are booleans, and neither side short-circuits.</dd>
+
+              <dt>Stack</dt>
+              <dd><code>Pop</code> <code>Dup</code> <code>Swap</code></dd>
+
+              <dt>Variables</dt>
+              <dd><code>StoreVar 0</code> <code>LoadVar 0</code> — slots are numbered, not named.</dd>
+
+              <dt>Control flow</dt>
+              <dd>
+                <code>Jump .label</code> <code>JumpIfFalse .label</code>
+                <code>Call .label</code> <code>Return</code>
+              </dd>
+
+              <dt>Strings and arrays</dt>
+              <dd>
+                <code>PushString "hi"</code> <code>MakeString hi</code> <code>StringConcat</code>
+                <code>MakeArray 3</code> <code>ArrayGet</code> <code>ArraySet</code>
+              </dd>
+
+              <dt>Modules</dt>
+              <dd>
+                <code>MakeModule 1 name</code> <code>ModuleGet name</code> <code>ModuleSet name</code>
+                <code>LoadGlobal io</code> <code>GetExport print</code>
+              </dd>
+
+              <dt>Native calls</dt>
+              <dd>
+                <code>io.print CallNative 1</code> — <code>io.print</code> loads the standard
+                <code>io</code> module's export, and <code>CallNative</code> calls it with that
+                many arguments from the stack.
+              </dd>
+
+              <dt>Actors</dt>
+              <dd>
+                <code>SpawnActor .body</code> <code>SendMessage</code> <code>ReceiveMessage</code>
+                — spawning leaves the actor on the stack; sending takes a message below it and
+                leaves the actor there to send again.
+              </dd>
+
+              <dt>Supervision</dt>
+              <dd>
+                <code>SpawnSupervisor .body</code> <code>SetStrategy 0|1|2</code>
+                <code>SuperviseChild &lt;address&gt;</code> <code>RestartChild &lt;address&gt;</code>
+                — strategies are one-for-one, one-for-all and rest-for-one.
+              </dd>
+            </dl>
+
+            <h3>How this page runs your program</h3>
+            <p>
+              This is the VM from the repository compiled to WebAssembly, not a
+              reimplementation: the same compiler, the same opcodes, the same heap and
+              garbage collector. It runs in a worker under an instruction budget, and the
+              page stops a run that outlasts its stopwatch, so a program that loops forever
+              costs you a message rather than the tab.
+            </p>
+            <p class="muted" id="limits"></p>
+          </div>
+        </div>
+
+        <p class="status" id="status" role="status">Ready.</p>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,59 @@
+name: Playground
+
+# Publishes the browser playground -- the VM compiled to WebAssembly behind a
+# static page -- to GitHub Pages.
+#
+# The repository has to be told to serve it: Settings -> Pages -> Build and
+# deployment -> Source: GitHub Actions. Until that is set, this workflow builds
+# the site and the deploy step fails with "Pages is not enabled".
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one half-way: an interrupted
+# deploy can leave the site serving a partial upload.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/wasm
+
+      - name: Build the site
+        run: ./web/build.sh
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

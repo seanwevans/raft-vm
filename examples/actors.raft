@@ -1,0 +1,19 @@
+# Actors: spawn a worker, send it a number, and let it print the number.
+#
+# SpawnActor leaves the new process on the stack above the message that was
+# pushed for it. SendMessage takes that message and leaves the actor behind, so
+# the same actor can be sent to again.
+
+42
+SpawnActor .worker
+SendMessage
+Pop
+Jump .done
+
+.worker
+ReceiveMessage
+io.print CallNative 1
+Return
+
+.done
+Return
