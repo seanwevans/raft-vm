@@ -44,6 +44,35 @@ jobs:
       # noisy to gate on. This only keeps the benchmarks from rotting.
       - run: cargo bench --no-run
 
+  playground:
+    name: Playground build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: web/wasm
+      # The playground crate is its own workspace, so `cargo test --all` never
+      # compiles it. Building it here is what catches a change to the VM that
+      # breaks the browser build -- a dependency that will not cross-compile,
+      # or an API the wasm shim calls.
+      - name: Check formatting
+        run: cargo fmt --all --manifest-path web/wasm/Cargo.toml -- --check
+      - name: Lint
+        run: |
+          cargo clippy --manifest-path web/wasm/Cargo.toml \
+            --release --target wasm32-unknown-unknown -- -D warnings
+      - name: Build the playground
+        run: ./web/build.sh
+      - name: Check the built site
+        run: |
+          test -s web/dist/raft.wasm
+          test -s web/dist/index.html
+          test -s web/dist/examples/index.json
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest

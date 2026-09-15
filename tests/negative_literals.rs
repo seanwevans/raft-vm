@@ -24,6 +24,9 @@ fn a_negative_integer_is_a_literal() {
 }
 
 #[test]
+// The literal under test is the digits of pi by coincidence; the constant
+// clippy suggests is not what the lexer was handed.
+#[allow(clippy::approx_constant)]
 fn a_negative_float_is_a_literal() {
     match compile("-3.14").as_slice() {
         [OpCode::PushConst(Value::Float(value))] => assert!((value + 3.14).abs() < f64::EPSILON),

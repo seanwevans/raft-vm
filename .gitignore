@@ -2,3 +2,5 @@
 *.bak
 *.lock
 docs/*
+/web/dist
+/web/wasm/target

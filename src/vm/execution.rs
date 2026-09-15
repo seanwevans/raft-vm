@@ -32,6 +32,9 @@ pub struct ProcessContext {
     pub process_id: usize,
     pub self_sender: Sender<MessageValue>,
     pub trap_exits: bool,
+    /// The instruction budget the spawning process runs under, inherited by
+    /// anything it spawns. `None` is unbounded.
+    pub instruction_budget: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -104,6 +107,7 @@ impl ExecutionContext {
             process_id,
             self_sender,
             trap_exits,
+            instruction_budget: None,
         };
         self.step_program(&program, heap, Some(&process))
     }

@@ -51,6 +51,8 @@ pub enum VmError {
     MailboxDisconnected,
     #[error("Process ID space exhausted and no recycled IDs are available")]
     ProcessIdExhausted,
+    #[error("Instruction budget of {0} exhausted")]
+    InstructionBudgetExhausted(u64),
     #[error("Channel send error: {error}")]
     ChannelSend { error: String, value: Value },
     #[error("Compilation error: {0}")]

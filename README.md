@@ -27,6 +27,7 @@ a simple and extensible design.
 - [Getting Started](#getting-started)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Playground](#playground)
 - [Architecture](#architecture)
 - [Opcode Reference](#opcode-reference)
 - [Testing](#testing)
@@ -117,6 +118,51 @@ enter `exit` at a fresh prompt to quit.
 
 ---
 
+## Playground
+Raft runs in the browser at
+**https://seanwevans.github.io/raft-vm/** — write a program, press
+<kbd>Ctrl</kbd>+<kbd>Enter</kbd>, and see what it prints, what it left on the
+stack, and the bytecode it compiled to.
+
+It is this VM, not a second implementation of it: `web/wasm` compiles the crate
+to `wasm32-unknown-unknown` and the page loads that module directly, so the
+compiler, the opcodes, the heap and the collector are the ones the tests cover.
+There is no bindgen and no JavaScript toolchain — the page talks to the module
+over a handful of exported functions and instantiates it with plain
+`WebAssembly.instantiate`.
+
+Two things keep a program typed into a text box from taking the tab with it:
+
+- Every run is bounded by [`VM::set_instruction_budget`](src/vm/vm.rs), which
+  stops a program that will not stop itself and reports it as an ordinary
+  runtime error. An actor inherits the budget of whatever spawned it.
+- The VM runs in a web worker with a stopwatch on it. A program that blocks
+  forever — a `ReceiveMessage` with nothing left to send to it — has its worker
+  terminated and replaced.
+
+`io.print` has nowhere to go in a browser, so the page installs a sink with
+[`stdlib::set_print_sink`](src/stdlib.rs) and shows what the program wrote.
+
+### Building it locally
+
+```bash
+rustup target add wasm32-unknown-unknown
+./web/build.sh                                   # assembles web/dist
+python3 -m http.server --directory web/dist 8080
+```
+
+The build takes the `.raft` files in `examples/` along with it, so anything
+added there shows up in the playground's example menu.
+
+### Deploying it
+`.github/workflows/playground.yml` builds the site on every push to `main` and
+deploys it with GitHub Pages. Pages has to be pointed at the workflow once, by
+hand: **Settings → Pages → Build and deployment → Source: GitHub Actions**. The
+site is entirely static — no server, no build step at page load — so any static
+host will serve `web/dist` just as well.
+
+---
+
 ## Architecture
 
 ### Components
@@ -129,6 +175,20 @@ enter `exit` at a fresh prompt to quit.
 - **Opcodes**: Define the core instruction set for the VM, such as arithmetic,
                stack manipulation, and control flow.
  
+### Bounded execution
+A host that runs programs it did not write can cap how much work one is allowed
+to do:
+
+```rust
+let (mut vm, _tx) = VM::new(bytecode, None);
+vm.set_instruction_budget(Some(5_000_000));
+vm.run().await?; // VmError::InstructionBudgetExhausted if it runs on
+```
+
+The budget is per `run` call, it travels to actors spawned under it, and
+`vm.instructions_executed()` reports what the last run actually spent. Left
+unset, a process runs unbounded, which is what the CLI does.
+
 ### Platform Integration
 The VM operates through its runtime, message-passing interfaces, and native
 standard-library bindings. Host Rust functions can be registered as heap-backed

@@ -41,6 +41,8 @@ pub struct VM {
     links: Vec<Sender<MessageValue>>,
     trap_exits: bool,
     reductions: usize,
+    instructions: u64,
+    instruction_budget: Option<u64>,
     _supervisor: Option<Sender<usize>>,
 }
 
@@ -77,6 +79,8 @@ impl VM {
                 links: Vec::new(),
                 trap_exits: false,
                 reductions: 0,
+                instructions: 0,
+                instruction_budget: None,
                 _supervisor: supervisor,
             },
             tx,
@@ -149,6 +153,34 @@ impl VM {
         self.restart_ip = ip;
     }
 
+    /// Bound how many instructions a single `run` may execute.
+    ///
+    /// A host that runs programs it did not write -- the browser playground
+    /// runs whatever is typed into it -- needs a program that loops forever to
+    /// come back rather than wedge the host. Spending the budget stops the
+    /// process with [`VmError::InstructionBudgetExhausted`], which reaches
+    /// linked processes like any other runtime error. An actor spawned while a
+    /// budget is in force gets that budget too, so a child cannot spin where
+    /// its parent may not.
+    ///
+    /// `None`, the default, runs unbounded.
+    pub fn set_instruction_budget(&mut self, budget: Option<u64>) {
+        self.instruction_budget = budget;
+    }
+
+    /// The instruction budget this process runs under, if it is bounded.
+    pub fn instruction_budget(&self) -> Option<u64> {
+        self.instruction_budget
+    }
+
+    /// Instructions executed by the most recent `run`.
+    ///
+    /// Each `run` counts from zero, which is also what the instruction budget
+    /// is measured against.
+    pub fn instructions_executed(&self) -> u64 {
+        self.instructions
+    }
+
     pub async fn run(&mut self) -> Result<(), VmError> {
         if self.execution.bytecode.is_empty() {
             log::warn!("Attempted to run VM with empty bytecode");
@@ -166,15 +198,42 @@ impl VM {
             process_id: self.process_id,
             self_sender: self.self_sender.clone(),
             trap_exits: self.trap_exits,
+            instruction_budget: self.instruction_budget,
         };
 
+        self.instructions = 0;
+
         loop {
+            if let Some(budget) = self.instruction_budget {
+                // A budget bounds the instructions a program executes, so it is
+                // only overrun while the program still has one to run: a program
+                // whose last instruction fits exactly has not overrun anything,
+                // and the halt at the end of the program is not an instruction.
+                if self.instructions >= budget && self.execution.ip < program.len() {
+                    log::error!(
+                        "Instruction budget of {} exhausted at ip {}",
+                        budget,
+                        self.execution.ip
+                    );
+                    let error = VmError::InstructionBudgetExhausted(budget);
+                    self.notify_links(&error).await;
+                    return Err(error);
+                }
+            }
+
             let state = self
                 .execution
                 .step_program(&program, &mut self.heap, Some(&process));
+            if !matches!(state, Ok(ExecutionState::Halted)) {
+                self.instructions = self.instructions.saturating_add(1);
+            }
 
             match state {
                 Ok(ExecutionState::Continue) => {
+                    // Reference counting lowers counts but never reclaims the
+                    // slot, so without a periodic sweep a program's heap grows
+                    // for as long as it runs.
+                    self.collect_garbage_if_needed();
                     self.reductions += 1;
                     if self.reductions >= REDUCTION_QUOTA {
                         self.reductions = 0;
@@ -349,6 +408,7 @@ impl VM {
         self.self_sender = tx.clone();
         self.restart_ip = start_ip;
         self.reductions = 0;
+        self.instructions = 0;
         tx
     }
 

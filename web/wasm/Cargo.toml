@@ -1,0 +1,28 @@
+[package]
+name = "raft-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "The Raft VM compiled to WebAssembly for the browser playground"
+license = "MIT"
+publish = false
+
+# Its own workspace on purpose. The playground is only ever built for wasm32,
+# and keeping it out of the VM's workspace keeps `cargo test`, `cargo clippy`
+# and the coverage floor measuring the VM and nothing else.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+raft = { path = "../.." }
+# Only the current-thread scheduler: actors are spawned onto it, and a browser
+# has no threads to run anything else on.
+tokio = { version = "1.0", features = ["rt"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
