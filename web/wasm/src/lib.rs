@@ -37,13 +37,23 @@ const MAX_RENDER_DEPTH: usize = 8;
 /// print; far too few to wait out one that is blocked forever.
 const DRAIN_TICKS: usize = 32;
 
-extern "C" {
-    /// Report a panic to the host before the instance aborts.
-    ///
-    /// wasm cannot unwind and has no stderr to fall back on, so without this a
-    /// panic would reach the page as a bare "unreachable" trap.
-    fn raft_host_panic(ptr: *const u8, len: usize);
-}
+/// Bytes set aside for the message a panicking instance leaves behind.
+const PANIC_LOG_CAPACITY: usize = 512;
+
+/// Where a panicking instance leaves its message.
+///
+/// wasm cannot unwind and a browser has no stderr, so a panic arrives at the
+/// host as a bare trap -- and a trapped instance cannot be called again to ask
+/// what happened. The message goes in a buffer at a fixed address instead: the
+/// host takes the address with [`raft_panic_log`] before running anything, and
+/// reads the message out of the module's memory afterwards, which stays
+/// readable once the instance is dead.
+///
+/// The first four bytes are the message length, little-endian; the rest is
+/// UTF-8. Declaring an imported function to call instead would be the obvious
+/// way to do this, and it does not link: an undefined symbol is an error for
+/// this target, not an import.
+static mut PANIC_LOG: [u8; PANIC_LOG_CAPACITY] = [0; PANIC_LOG_CAPACITY];
 
 thread_local! {
     /// The report the host is about to read. Held until the next call replaces
@@ -140,6 +150,15 @@ pub extern "C" fn raft_info() -> usize {
     store(json)
 }
 
+/// The address of the panic buffer, which the host reads after a trap.
+///
+/// The buffer starts zeroed, so a length of zero means the instance has not
+/// panicked.
+#[no_mangle]
+pub extern "C" fn raft_panic_log() -> *const u8 {
+    (&raw const PANIC_LOG) as *const u8
+}
+
 /// The start of the report produced by the last call.
 ///
 /// Valid until the next call into this module. The host must re-read the
@@ -167,13 +186,27 @@ fn install_panic_hook() {
             return;
         }
 
-        std::panic::set_hook(Box::new(|info| {
-            let message = info.to_string();
-            // Safety: the host supplies this import and only reads the bytes
-            // for the duration of the call.
-            unsafe { raft_host_panic(message.as_ptr(), message.len()) };
-        }));
+        std::panic::set_hook(Box::new(|info| write_panic_log(&info.to_string())));
     });
+}
+
+/// Record a panic message for the host, truncated to what the buffer holds.
+fn write_panic_log(message: &str) {
+    let capacity = PANIC_LOG_CAPACITY - 4;
+    let mut end = message.len().min(capacity);
+    while end > 0 && !message.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    // Safety: a wasm instance runs on one thread, and the host only reads the
+    // buffer once that instance has stopped. The length is written last, so a
+    // host reading a partly written buffer sees the previous length rather than
+    // a length that runs past the bytes behind it.
+    unsafe {
+        let base = (&raw mut PANIC_LOG) as *mut u8;
+        std::ptr::copy_nonoverlapping(message.as_ptr(), base.add(4), end);
+        std::ptr::copy_nonoverlapping((end as u32).to_le_bytes().as_ptr(), base, 4);
+    }
 }
 
 /// Compile and run `source`, reporting everything the page shows about it.

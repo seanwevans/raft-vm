@@ -34,19 +34,12 @@ function loadModule() {
 }
 
 function instantiate(module) {
-  // The instance reports panics through this import before it aborts; wasm
-  // cannot unwind, so without it a panic would reach the page as a bare
-  // "unreachable" trap with nothing to say about itself.
-  const host = { panic: null, memory: null };
-  const instance = new WebAssembly.Instance(module, {
-    env: {
-      raft_host_panic(pointer, length) {
-        host.panic = readString(host.memory, pointer, length);
-      },
-    },
-  });
-  host.memory = instance.exports.memory;
-  return { instance, host };
+  // The module imports nothing, so there is no import object to supply. A
+  // panic leaves its message in a buffer at a fixed address instead: the
+  // address is taken now, while the instance still answers calls, and read
+  // back afterwards even if the instance has trapped.
+  const instance = new WebAssembly.Instance(module);
+  return { instance, panicPointer: instance.exports.raft_panic_log() };
 }
 
 function readString(memory, pointer, length) {
@@ -69,12 +62,23 @@ function writeSource(exports, source) {
   return { pointer, length: bytes.length };
 }
 
-// A trap ends the instance, so whatever the panic hook managed to say is all
-// the explanation there will ever be. The one that a program can actually
+// The message a panicking instance left behind, or '' if it did not panic.
+// The first four bytes are the length; the rest is UTF-8.
+function readPanic(memory, pointer) {
+  try {
+    const length = new DataView(memory.buffer).getUint32(pointer, true);
+    return length === 0 ? '' : readString(memory, pointer + 4, length);
+  } catch (error) {
+    // A trap severe enough to lose the memory leaves nothing to read.
+    return '';
+  }
+}
+
+// A trap ends the instance, so whatever the panic hook managed to record is
+// all the explanation there will ever be. The one that a program can actually
 // provoke is a blocked receive: the scheduler tries to park a thread the
 // browser does not have.
-function describeTrap(host, error) {
-  const panic = host.panic || '';
+function describeTrap(panic, error) {
   if (/condvar|cannot park|no_threads/i.test(panic)) {
     return {
       error: 'Deadlock: every process is blocked waiting for a message, so none can arrive.',
@@ -89,7 +93,7 @@ function describeTrap(host, error) {
 
 async function evaluate(source, budget) {
   const module = await loadModule();
-  const { instance, host } = instantiate(module);
+  const { instance, panicPointer } = instantiate(module);
   const exports = instance.exports;
   const started = performance.now();
 
@@ -100,7 +104,10 @@ async function evaluate(source, budget) {
     report.elapsed = performance.now() - started;
     return report;
   } catch (error) {
-    const { error: message, detail } = describeTrap(host, error);
+    const { error: message, detail } = describeTrap(
+      readPanic(exports.memory, panicPointer),
+      error
+    );
     return {
       ok: false,
       stage: 'run',
