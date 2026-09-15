@@ -255,10 +255,6 @@ fn make_array(
     }
     elements.reverse();
 
-    for value in &elements {
-        retain_value(heap, value)?;
-    }
-
     let address = heap.allocate(HeapObject::Array(elements, 0));
     push_value(execution, heap, Value::Reference(address))
 }
