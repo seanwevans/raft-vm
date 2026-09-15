@@ -59,8 +59,11 @@ jobs:
       # compiles it. Building it here is what catches a change to the VM that
       # breaks the browser build -- a dependency that will not cross-compile,
       # or an API the wasm shim calls.
+      # rustfmt is pointed at the playground's own source rather than run
+      # through cargo, which follows the path dependency back into the VM and
+      # reports it here as well as in the job that owns it.
       - name: Check formatting
-        run: cargo fmt --all --manifest-path web/wasm/Cargo.toml -- --check
+        run: rustfmt --edition 2021 --check web/wasm/src/lib.rs
       - name: Lint
         run: |
           cargo clippy --manifest-path web/wasm/Cargo.toml \
