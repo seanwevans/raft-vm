@@ -12,7 +12,10 @@ fn example_paths() -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = fs::read_dir(&directory)
         .unwrap_or_else(|error| panic!("reading {}: {error}", directory.display()))
         .map(|entry| entry.expect("directory entry").path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "raft"))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "raft")
+        })
         .collect();
     paths.sort();
     paths

@@ -157,28 +157,24 @@ fn bench_heap_opcodes(c: &mut Criterion) {
         ),
     );
 
-    bench_dispatch(
-        &mut group,
-        "array_get",
-        {
-            let mut bytecode = vec![
+    bench_dispatch(&mut group, "array_get", {
+        let mut bytecode = vec![
+            OpCode::PushConst(Value::Integer(1)),
+            OpCode::PushConst(Value::Integer(2)),
+            OpCode::MakeArray(2),
+        ];
+        bytecode.extend(repeat(
+            &[
+                OpCode::Dup,
                 OpCode::PushConst(Value::Integer(1)),
-                OpCode::PushConst(Value::Integer(2)),
-                OpCode::MakeArray(2),
-            ];
-            bytecode.extend(repeat(
-                &[
-                    OpCode::Dup,
-                    OpCode::PushConst(Value::Integer(1)),
-                    OpCode::ArrayGet,
-                    OpCode::Pop,
-                ],
-                ITERATIONS,
-            ));
-            bytecode.push(OpCode::Pop);
-            bytecode
-        },
-    );
+                OpCode::ArrayGet,
+                OpCode::Pop,
+            ],
+            ITERATIONS,
+        ));
+        bytecode.push(OpCode::Pop);
+        bytecode
+    });
 
     group.finish();
 }
@@ -243,7 +239,9 @@ fn bench_messaging(c: &mut Criterion) {
                         .expect("mailbox should accept the message");
                     vm
                 },
-                |mut vm| runtime.block_on(async { vm.run().await.expect("receive should succeed") }),
+                |mut vm| {
+                    runtime.block_on(async { vm.run().await.expect("receive should succeed") })
+                },
                 BatchSize::SmallInput,
             )
         });

@@ -438,9 +438,7 @@ impl Parser {
                 Instruction::SpawnSupervisor(self.expect_address("SpawnSupervisor")?)
             }
             "SetStrategy" => Instruction::SetStrategy(self.expect_usize("SetStrategy")?),
-            "SuperviseChild" => {
-                Instruction::SuperviseChild(self.expect_usize("SuperviseChild")?)
-            }
+            "SuperviseChild" => Instruction::SuperviseChild(self.expect_usize("SuperviseChild")?),
             "RestartChild" => Instruction::RestartChild(self.expect_usize("RestartChild")?),
             _ => return Err(CompilerError::InvalidToken(identifier.to_string())),
         };

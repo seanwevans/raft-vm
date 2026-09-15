@@ -115,7 +115,9 @@ async fn receive_message_updates_reference_counts() {
         // allocated for this stack slot, so `ReceiveMessage` does not retain it
         // a second time. At 2 the message could never be collected after the
         // program popped it.
-        HeapObject::Array(_, rc) => assert_eq!(*rc, 1, "message should be retained once, by the stack"),
+        HeapObject::Array(_, rc) => {
+            assert_eq!(*rc, 1, "message should be retained once, by the stack")
+        }
         other => panic!("expected array at message_addr, got {other:?}"),
     }
 

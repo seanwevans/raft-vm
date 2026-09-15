@@ -88,9 +88,7 @@ async fn reading_an_element_out_of_its_last_owner_keeps_it_alive() {
     ]);
 
     // The array on the stack is the leaf's only owner, and ArrayGet consumes it.
-    OpCode::ArrayGet
-        .execute(&mut execution, &mut heap)
-        .unwrap();
+    OpCode::ArrayGet.execute(&mut execution, &mut heap).unwrap();
 
     let leaf = top_address(&execution);
     assert_eq!(
@@ -163,11 +161,13 @@ async fn overwriting_an_element_releases_only_the_old_value() {
         other => panic!("expected the new string, got {other:?}"),
     };
 
-    OpCode::ArraySet
-        .execute(&mut execution, &mut heap)
-        .unwrap();
+    OpCode::ArraySet.execute(&mut execution, &mut heap).unwrap();
 
-    assert_eq!(ref_count(&heap, array), 1, "the array is still on the stack");
+    assert_eq!(
+        ref_count(&heap, array),
+        1,
+        "the array is still on the stack"
+    );
     assert_eq!(
         ref_count(&heap, new),
         1,
@@ -230,7 +230,10 @@ async fn a_nested_value_is_collected_once_its_root_is_dropped() {
     heap.collect_garbage();
 
     assert!(heap.get(outer).is_none(), "the root should be reclaimed");
-    assert!(heap.get(inner).is_none(), "the inner array should be reclaimed");
+    assert!(
+        heap.get(inner).is_none(),
+        "the inner array should be reclaimed"
+    );
     assert!(heap.get(leaf).is_none(), "the leaf should be reclaimed too");
 }
 
