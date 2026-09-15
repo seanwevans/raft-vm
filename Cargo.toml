@@ -8,11 +8,20 @@ name = "raft"
 path = "src/lib.rs"
 
 [dependencies]
-tokio = { version = "1.0", features = ["full"] }
 thiserror = "1.0"
 log = "0.4"
+
+# The CLI is the only native-only surface: argument parsing, logging setup, and
+# Tokio's I/O and multi-threaded scheduler. wasm32 has no sockets, files or
+# threads, so it takes only the parts of Tokio the VM itself runs on -- mpsc
+# channels and the current-thread scheduler that actors are spawned onto.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.0", features = ["full"] }
 env_logger = "0.10"
 clap = { version = "4.4", features = ["derive"] }  # command-line parsing
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.0", features = ["sync", "rt", "macros"] }
 
 [dev-dependencies]
 proptest = "1.11"
