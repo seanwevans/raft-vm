@@ -175,6 +175,10 @@ impl VM {
 
             match state {
                 Ok(ExecutionState::Continue) => {
+                    // Reference counting lowers counts but never reclaims the
+                    // slot, so without a periodic sweep a program's heap grows
+                    // for as long as it runs.
+                    self.collect_garbage_if_needed();
                     self.reductions += 1;
                     if self.reductions >= REDUCTION_QUOTA {
                         self.reductions = 0;
