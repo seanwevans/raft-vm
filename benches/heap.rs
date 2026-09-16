@@ -41,7 +41,9 @@ fn wide_tree(breadth: usize) -> (Heap, usize) {
             let address = heap.allocate(HeapObject::String(format!("{index}:{leaf}"), 1));
             leaves.push(Value::Reference(address));
         }
-        children.push(Value::Reference(heap.allocate(HeapObject::Array(leaves, 1))));
+        children.push(Value::Reference(
+            heap.allocate(HeapObject::Array(leaves, 1)),
+        ));
     }
     let root = heap.allocate(HeapObject::Array(children, 1));
     (heap, root)
@@ -58,7 +60,9 @@ fn bench_allocate(c: &mut Criterion) {
                 || {
                     (
                         Heap::new(),
-                        (0..count).map(|index| index.to_string()).collect::<Vec<_>>(),
+                        (0..count)
+                            .map(|index| index.to_string())
+                            .collect::<Vec<_>>(),
                     )
                 },
                 |(mut heap, payloads): (Heap, Vec<String>)| {
@@ -99,7 +103,9 @@ fn bench_collect_garbage(c: &mut Criterion) {
 
     // Collection also has to trace through structure, not just flat slots.
     for breadth in [16usize, 32] {
-        group.throughput(Throughput::Elements((breadth * breadth + breadth + 1) as u64));
+        group.throughput(Throughput::Elements(
+            (breadth * breadth + breadth + 1) as u64,
+        ));
         group.bench_with_input(
             BenchmarkId::from_parameter(format!("tree{breadth}")),
             &breadth,
@@ -127,7 +133,8 @@ fn bench_release_reference(c: &mut Criterion) {
             b.iter_batched(
                 || nested_chain(depth),
                 |(mut heap, root)| {
-                    heap.release_reference(root).expect("release should succeed");
+                    heap.release_reference(root)
+                        .expect("release should succeed");
                     heap
                 },
                 BatchSize::SmallInput,

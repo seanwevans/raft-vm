@@ -62,7 +62,10 @@ async fn restarting_clears_the_stack_and_locals() {
         None,
     );
     vm.run().await.expect("program should run");
-    assert!(!vm.stack().is_empty(), "precondition: the stack has a value");
+    assert!(
+        !vm.stack().is_empty(),
+        "precondition: the stack has a value"
+    );
 
     let _tx = vm.reset_for_restart(0);
     assert!(vm.stack().is_empty(), "a restarted process starts empty");

@@ -386,7 +386,7 @@ impl VM {
         // The restarted process starts with an empty stack and no locals, so
         // release what they held rather than stranding those objects. Globals
         // hold the standard library and carry over with their counts intact.
-        let mut discarded: Vec<Value> = self.execution.stack.drain(..).collect();
+        let mut discarded: Vec<Value> = std::mem::take(&mut self.execution.stack);
         discarded.extend(self.execution.locals.drain().map(|(_, value)| value));
         for value in discarded {
             if let Value::Reference(address) = value {

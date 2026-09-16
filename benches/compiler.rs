@@ -94,13 +94,9 @@ fn bench_label_resolution(c: &mut Criterion) {
     for labels in [16usize, 256] {
         let source = labelled_source(labels);
         group.throughput(Throughput::Elements(labels as u64));
-        group.bench_with_input(
-            BenchmarkId::from_parameter(labels),
-            &source,
-            |b, source| {
-                b.iter(|| Compiler::compile(black_box(source)).expect("labels should resolve"))
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(labels), &source, |b, source| {
+            b.iter(|| Compiler::compile(black_box(source)).expect("labels should resolve"))
+        });
     }
     group.finish();
 }
